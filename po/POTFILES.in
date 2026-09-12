@@ -1,0 +1,4 @@
+data/io.github.rtomasa.Briefcase.desktop.in
+data/io.github.rtomasa.Briefcase.metainfo.xml.in
+src/application.rs
+

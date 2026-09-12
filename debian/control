@@ -1,0 +1,16 @@
+Source: gnome-briefcase
+Section: utils
+Priority: optional
+Maintainer: GNOME Briefcase contributors <noreply@example.com>
+Build-Depends: debhelper-compat (= 13), meson, cargo, rustc, libgtk-4-dev (>= 4.10), libadwaita-1-dev (>= 1.5), gettext
+Standards-Version: 4.6.2
+Homepage: https://github.com/rtomasa/gnome-briefcase
+Rules-Requires-Root: no
+
+Package: gnome-briefcase
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Simple bidirectional folder synchronization for GNOME
+ Briefcase synchronizes a source folder and a portable copy on demand,
+ with an understandable review and explicit conflict handling.
+

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gnome-briefcase">
+  <schema id="io.github.rtomasa.Briefcase" path="/io/github/rtomasa/Briefcase/">
+    <key name="known-briefcases" type="as">
+      <default>[]</default>
+      <summary>Known Briefcase folders</summary>
+    </key>
+    <key name="confirm-deletions" type="b">
+      <default>true</default>
+      <summary>Confirm deletions before updating</summary>
+    </key>
+    <key name="change-detection-mode" type="s">
+      <choices><choice value="fast"/><choice value="verified"/></choices>
+      <default>'fast'</default>
+      <summary>Change detection mode</summary>
+    </key>
+    <key name="window-width" type="i"><default>720</default></key>
+    <key name="window-height" type="i"><default>620</default></key>
+  </schema>
+</schemalist>
+

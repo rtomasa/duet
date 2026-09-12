@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.rtomasa.Briefcase</id>
+  <name>Briefcase</name>
+  <summary>Understandable, local folder synchronization</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.rtomasa">
+    <name>GNOME Briefcase contributors</name>
+  </developer>
+  <description>
+    <p>Briefcase keeps a source folder and a portable copy synchronized. It scans only when asked and shows the direction of every change before updating anything.</p>
+    <p>Conflicts are never settled using timestamps. Choose the Source copy, the Briefcase copy, or leave the file unchanged.</p>
+  </description>
+  <launchable type="desktop-id">io.github.rtomasa.Briefcase.desktop</launchable>
+  <url type="homepage">https://github.com/rtomasa/gnome-briefcase</url>
+  <url type="bugtracker">https://github.com/rtomasa/gnome-briefcase/issues</url>
+  <content_rating type="oars-1.1" />
+  <recommends>
+    <display_length compare="ge">360</display_length>
+  </recommends>
+  <releases>
+    <release version="0.1.0" date="2026-09-12">
+      <description><p>Initial development release.</p></description>
+    </release>
+  </releases>
+</component>
+

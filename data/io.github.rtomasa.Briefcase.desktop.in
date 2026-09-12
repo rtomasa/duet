@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Briefcase
+Comment=Synchronize two folders explicitly and locally
+Exec=gnome-briefcase
+Icon=io.github.rtomasa.Briefcase
+Terminal=false
+Type=Application
+Categories=Utility;FileTools;GTK;GNOME;
+Keywords=sync;folder;USB;backup;briefcase;
+StartupNotify=true
