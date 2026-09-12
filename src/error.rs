@@ -2,31 +2,33 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BriefcaseError {
-    #[error("No se pudo acceder a {path}: {source}")]
+    #[error("Could not access {path}: {source}")]
     Io {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("La carpeta no es un maletín válido: {0}")]
+    #[error("The folder is not a valid Briefcase: {0}")]
     InvalidBriefcase(PathBuf),
-    #[error("La carpeta de destino ya existe y no está vacía: {0}")]
+    #[error("The destination folder already exists and is not empty: {0}")]
     DestinationNotEmpty(PathBuf),
-    #[error("La carpeta Source y el Briefcase no pueden contenerse una dentro de otra")]
+    #[error("The Source and Briefcase folders cannot contain one another")]
     OverlappingRoots,
-    #[error("La ruta «{0}» no permanece dentro de la carpeta sincronizada")]
+    #[error("The path “{0}” does not remain inside the synchronized folder")]
     UnsafePath(PathBuf),
-    #[error("Los enlaces simbólicos aún no son compatibles: {0}")]
+    #[error("Symbolic links are not supported yet: {0}")]
     UnsupportedSymlink(PathBuf),
-    #[error("Hay otra sincronización modificando este maletín")]
+    #[error("Another synchronization is modifying this Briefcase")]
     AlreadyLocked,
-    #[error("El origen no está disponible: {0}")]
+    #[error("Synchronization was stopped")]
+    Cancelled,
+    #[error("The Source is unavailable: {0}")]
     SourceUnavailable(PathBuf),
-    #[error("Conflicto sin resolver: {0}")]
+    #[error("Unresolved conflict: {0}")]
     UnresolvedConflict(PathBuf),
-    #[error("Error en la base de datos: {0}")]
+    #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
-    #[error("Metadatos del maletín no válidos: {0}")]
+    #[error("Invalid Briefcase metadata: {0}")]
     Manifest(#[from] serde_json::Error),
     #[error("{0}")]
     Other(#[from] anyhow::Error),

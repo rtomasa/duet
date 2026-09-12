@@ -9,7 +9,7 @@ fn main() -> glib::ExitCode {
 #[cfg(not(feature = "gui"))]
 fn main() {
     eprintln!(
-        "GNOME Briefcase se compila con la característica `gui`.\n\
-         Use: cargo run --features gui"
+        "GNOME Briefcase was built without the `gui` feature.\n\
+         Run: cargo run --features gui"
     );
 }

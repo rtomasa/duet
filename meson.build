@@ -41,8 +41,8 @@ binary = custom_target(
   output: 'gnome-briefcase',
   command: [
     find_program('sh'), '-c',
-    'CARGO_TARGET_DIR="$1" "$2" build --locked --release --features gui --manifest-path "$3" && cp "$1/release/gnome-briefcase" "$4"',
-    'cargo-build', target_dir, cargo.full_path(), meson.project_source_root() / 'Cargo.toml', '@OUTPUT@',
+    'GNOME_BRIEFCASE_LOCALEDIR="$5" CARGO_TARGET_DIR="$1" "$2" build --locked --release --features gui --manifest-path "$3" && cp "$1/release/gnome-briefcase" "$4"',
+    'cargo-build', target_dir, cargo.full_path(), meson.project_source_root() / 'Cargo.toml', '@OUTPUT@', datadir / 'locale',
   ],
   build_by_default: true,
   install: true,
@@ -55,5 +55,4 @@ gnome.post_install(
   update_desktop_database: true,
 )
 
-i18n.gettext('gnome-briefcase', preset: 'glib')
-
+subdir('po')

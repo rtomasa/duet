@@ -1,4 +1,6 @@
 #!/usr/bin/make -f
+
+export RUSTUP_TOOLCHAIN = stable
+
 %:
 	dh $@ --buildsystem=meson
-

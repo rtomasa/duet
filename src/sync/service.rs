@@ -90,6 +90,32 @@ impl BriefcaseService {
         plan: &SyncPlan,
         resolutions: &BTreeMap<PathBuf, ConflictResolution>,
     ) -> Result<SyncOutcome> {
+        self.synchronize_with_progress(plan, resolutions, |_, _, _, _| {})
+    }
+
+    pub fn synchronize_with_progress<F>(
+        &self,
+        plan: &SyncPlan,
+        resolutions: &BTreeMap<PathBuf, ConflictResolution>,
+        progress: F,
+    ) -> Result<SyncOutcome>
+    where
+        F: FnMut(&PlannedOperation, u64, u64, bool),
+    {
+        self.synchronize_with_progress_and_cancel(plan, resolutions, progress, || false)
+    }
+
+    pub fn synchronize_with_progress_and_cancel<F, C>(
+        &self,
+        plan: &SyncPlan,
+        resolutions: &BTreeMap<PathBuf, ConflictResolution>,
+        mut progress: F,
+        is_cancelled: C,
+    ) -> Result<SyncOutcome>
+    where
+        F: FnMut(&PlannedOperation, u64, u64, bool),
+        C: Fn() -> bool,
+    {
         let recovered = self.database.has_incomplete_transaction()?;
         let _lock = executor::MutationLock::acquire(&self.briefcase_root)?;
         let mut operations: Vec<_> = plan
@@ -112,10 +138,12 @@ impl BriefcaseService {
         let operations = executor::ordered(&operations);
         let transaction = self.database.begin_transaction(&operations)?;
         for (sequence, operation) in operations.iter().enumerate() {
-            if let Err(error) = executor::apply_one(
+            if let Err(error) = executor::apply_one_with_progress(
                 &self.manifest.source.last_known_path,
                 &self.briefcase_root,
                 operation,
+                &mut |completed, total| progress(operation, completed, total, false),
+                &is_cancelled,
             ) {
                 let _ = self
                     .database
@@ -127,6 +155,9 @@ impl BriefcaseService {
         }
         self.refresh_baseline_for(&operations)?;
         self.database.complete_transaction(&transaction)?;
+        for operation in &operations {
+            progress(operation, 1, 1, true);
+        }
         Ok(SyncOutcome {
             applied: operations.len(),
             skipped_conflicts: skipped,
@@ -165,7 +196,7 @@ impl BriefcaseService {
                 }
                 _ => {
                     return Err(BriefcaseError::Other(anyhow::anyhow!(
-                        "La operación sobre {} no produjo copias equivalentes",
+                        "The operation on {} did not produce equivalent copies",
                         path.display()
                     )))
                 }
@@ -218,7 +249,7 @@ fn resolve_conflict(
                 }
                 _ => {
                     return Err(BriefcaseError::Other(anyhow::anyhow!(
-                        "No hay ninguna eliminación que aceptar para {}",
+                        "There is no deletion to accept for {}",
                         operation.relative_path.display()
                     )))
                 }
@@ -274,6 +305,90 @@ mod tests {
         );
         assert!(briefcase.join("empty").is_dir());
         assert!(!source.join(".briefcase").exists());
+    }
+
+    #[test]
+    fn synchronization_reports_byte_progress_and_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let briefcase = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        write(&source.join("progress.txt"), "progress");
+        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let plan = service.compare(ScanMode::Verified).unwrap();
+        let mut events = Vec::new();
+
+        service
+            .synchronize_with_progress(
+                &plan,
+                &BTreeMap::new(),
+                |operation, completed, total, finished| {
+                    events.push((
+                        operation.relative_path.clone(),
+                        completed,
+                        total,
+                        finished,
+                    ));
+                },
+            )
+            .unwrap();
+
+        assert!(events.iter().any(|(path, completed, total, finished)| {
+            path == Path::new("progress.txt")
+                && !finished
+                && *completed == *total
+                && *total > 0
+        }));
+        assert!(events
+            .iter()
+            .any(|(path, _, _, finished)| path == Path::new("progress.txt") && *finished));
+        let copied = events
+            .iter()
+            .position(|(path, completed, total, finished)| {
+                path == Path::new("progress.txt")
+                    && !finished
+                    && *completed == *total
+                    && *total > 0
+            })
+            .unwrap();
+        let finished = events
+            .iter()
+            .position(|(path, _, _, finished)| {
+                path == Path::new("progress.txt") && *finished
+            })
+            .unwrap();
+        assert!(copied < finished);
+    }
+
+    #[test]
+    fn synchronization_can_be_stopped_during_a_file_copy() {
+        use std::cell::Cell;
+
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let briefcase = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("large.bin"), vec![7_u8; 3 * 1024 * 1024]).unwrap();
+        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let plan = service.compare(ScanMode::Verified).unwrap();
+        let cancelled = Cell::new(false);
+
+        let result = service.synchronize_with_progress_and_cancel(
+            &plan,
+            &BTreeMap::new(),
+            |operation, completed, _, finished| {
+                if operation.relative_path == Path::new("large.bin")
+                    && completed > 0
+                    && !finished
+                {
+                    cancelled.set(true);
+                }
+            },
+            || cancelled.get(),
+        );
+
+        assert!(matches!(result, Err(BriefcaseError::Cancelled)));
+        assert!(!briefcase.join("large.bin").exists());
     }
 
     #[test]

@@ -1,0 +1,510 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-briefcase 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-12 16:05+0200\n"
+"PO-Revision-Date: 2026-09-12 00:00+0200\n"
+"Last-Translator: GNOME Briefcase contributors\n"
+"Language-Team: fr\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:3
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:4 src/application.rs:40
+#: src/application.rs:67 src/application.rs:124 src/application.rs:154
+#: src/application.rs:345 src/application.rs:724 src/application.rs:1109
+msgid "Briefcase"
+msgstr "Mallette"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:4
+msgid "Synchronize two folders explicitly and locally"
+msgstr "Synchroniser explicitement et localement deux dossiers"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:10
+msgid "sync;folder;USB;backup;briefcase;"
+msgstr "synchroniser;dossier;USB;sauvegarde;mallette;"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:5
+msgid "Understandable, local folder synchronization"
+msgstr "Synchronisation locale de dossiers facile à comprendre"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:9 src/application.rs:1112
+msgid "GNOME Briefcase contributors"
+msgstr "Contributeurs de GNOME Mallette"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:12
+msgid ""
+"Briefcase keeps a source folder and a portable copy synchronized. It scans "
+"only when asked and shows the direction of every change before updating "
+"anything."
+msgstr ""
+"Mallette synchronise un dossier source et une copie portable. Elle analyse "
+"uniquement sur demande et affiche le sens de chaque modification avant de "
+"l’appliquer."
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:13
+msgid ""
+"Conflicts are never settled using timestamps. Choose the Source copy, the "
+"Briefcase copy, or leave the file unchanged."
+msgstr ""
+"Les conflits ne sont jamais résolus selon les dates. Choisissez la copie "
+"Source, la copie Mallette ou laissez le fichier inchangé."
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:24
+msgid "Initial development release."
+msgstr "Version initiale de développement."
+
+#: src/application.rs:69
+msgid "Keep two folders synchronized explicitly and locally"
+msgstr "Synchronisez explicitement et localement deux dossiers"
+
+#: src/application.rs:74
+msgid "_Create Briefcase"
+msgstr "_Créer une mallette"
+
+#: src/application.rs:77
+msgid "Choose a source and a portable destination"
+msgstr "Choisissez une source et une destination portable"
+
+#: src/application.rs:79
+msgid "_Open Briefcase"
+msgstr "_Ouvrir une mallette"
+
+#: src/application.rs:80
+msgid "Open an existing Briefcase folder"
+msgstr "Ouvrir un dossier Mallette existant"
+
+#: src/application.rs:87
+msgid "Your Briefcases"
+msgstr "Vos mallettes"
+
+#: src/application.rs:89
+msgid "Briefcases stay listed even when a removable drive is disconnected"
+msgstr ""
+"Les mallettes restent affichées même lorsqu’un disque amovible est déconnecté"
+
+#: src/application.rs:160
+msgid "Folder unavailable"
+msgstr "Dossier indisponible"
+
+#: src/application.rs:177
+msgid "Remove from the list"
+msgstr "Retirer de la liste"
+
+#: src/application.rs:203
+msgid ""
+"The folder {path} is not available. It may be on a disconnected drive. Do "
+"you want to remove it from the list?"
+msgstr ""
+"Le dossier {path} est indisponible. Il se trouve peut-être sur un disque "
+"déconnecté. Voulez-vous le retirer de la liste ?"
+
+#: src/application.rs:206
+msgid "Briefcase unavailable"
+msgstr "Mallette indisponible"
+
+#: src/application.rs:208
+msgid "Keep"
+msgstr "Conserver"
+
+#: src/application.rs:209
+msgid "Remove from List"
+msgstr "Retirer de la liste"
+
+#: src/application.rs:227
+msgid "Open Briefcase"
+msgstr "Ouvrir une mallette"
+
+#: src/application.rs:248
+msgid "Select Source Folder"
+msgstr "Sélectionner le dossier Source"
+
+#: src/application.rs:260
+msgid "Choose Briefcase Destination"
+msgstr "Choisir la destination de la Mallette"
+
+#: src/application.rs:287 src/application.rs:467 src/application.rs:833
+#: src/application.rs:897
+msgid "The background operation stopped unexpectedly"
+msgstr "L’opération en arrière-plan s’est arrêtée inopinément"
+
+#: src/application.rs:334
+msgid "Source unavailable"
+msgstr "Source indisponible"
+
+#: src/application.rs:339 src/application.rs:722
+msgid "Source"
+msgstr "Source"
+
+#: src/application.rs:351
+msgid "Ready to check"
+msgstr "Prêt à vérifier"
+
+#: src/application.rs:366
+msgid "_Check Again"
+msgstr "_Vérifier à nouveau"
+
+#: src/application.rs:367
+msgid "_Stop"
+msgstr "_Arrêter"
+
+#: src/application.rs:370
+msgid "_Synchronize"
+msgstr "_Synchroniser"
+
+#: src/application.rs:403
+msgid "_Locate Source…"
+msgstr "_Localiser la Source…"
+
+#: src/application.rs:441
+msgid "Checking folders…"
+msgstr "Vérification des dossiers…"
+
+#: src/application.rs:460 src/application.rs:464
+msgid "Check failed"
+msgstr "Échec de la vérification"
+
+#: src/application.rs:480
+msgid "Stopping…"
+msgstr "Arrêt…"
+
+#: src/application.rs:481
+msgid "Stopping synchronization…"
+msgstr "Arrêt de la synchronisation…"
+
+#: src/application.rs:488 src/application.rs:776
+msgid "Stop"
+msgstr "Arrêter"
+
+#: src/application.rs:500
+msgid "{count} change"
+msgid_plural "{count} changes"
+msgstr[0] "{count} modification"
+msgstr[1] "{count} modifications"
+
+#: src/application.rs:503
+msgid "{count} conflict"
+msgid_plural "{count} conflicts"
+msgstr[0] "{count} conflit"
+msgstr[1] "{count} conflits"
+
+#: src/application.rs:531 src/application.rs:912
+msgid "Synchronized"
+msgstr "Synchronisé"
+
+#: src/application.rs:532
+msgid "No changes found"
+msgstr "Aucune modification trouvée"
+
+#: src/application.rs:538
+msgid "Synchronize Non-conflicting Files"
+msgstr "Synchroniser les fichiers sans conflit"
+
+#: src/application.rs:540
+msgid "Synchronize"
+msgstr "Synchroniser"
+
+#: src/application.rs:567
+msgid "Both copies changed — skipped until you choose"
+msgstr "Les deux copies ont changé — ignoré jusqu’à votre choix"
+
+#: src/application.rs:577
+msgid "Keep Source"
+msgstr "Conserver la source"
+
+#: src/application.rs:578
+msgid "Will keep Source"
+msgstr "Conserver la source"
+
+#: src/application.rs:585
+msgid "Open Source Copy"
+msgstr "Ouvrir la copie Source"
+
+#: src/application.rs:593
+msgid "Keep Briefcase"
+msgstr "Conserver la mallette"
+
+#: src/application.rs:594
+msgid "Will keep Briefcase"
+msgstr "Conserver la mallette"
+
+#: src/application.rs:601
+msgid "Open Briefcase Copy"
+msgstr "Ouvrir la copie Mallette"
+
+#: src/application.rs:609
+msgid "Accept Deletion"
+msgstr "Accepter la suppression"
+
+#: src/application.rs:610
+msgid "Will accept deletion"
+msgstr "Accepter la suppression"
+
+#: src/application.rs:727
+msgid ""
+"{path} was deleted from {location}. Choose what to do with the remaining "
+"copy."
+msgstr ""
+"{path} a été supprimé de {location}. Choisissez quoi faire de la copie "
+"restante."
+
+#: src/application.rs:731
+msgid "File Deleted"
+msgstr "Fichier supprimé"
+
+#: src/application.rs:733 src/application.rs:979
+msgid "Skip"
+msgstr "Ignorer"
+
+#: src/application.rs:734 src/application.rs:980
+msgid "Restore Deleted File"
+msgstr "Restaurer le fichier supprimé"
+
+#: src/application.rs:735 src/application.rs:981
+msgid "Delete Other Copy"
+msgstr "Supprimer l’autre copie"
+
+#: src/application.rs:741
+msgid "Do not ask again for remaining deletions"
+msgstr "Ne plus demander pour les suppressions restantes"
+
+#: src/application.rs:773
+msgid "Synchronizing…"
+msgstr "Synchronisation…"
+
+#: src/application.rs:812
+msgid "Synchronized {count} item"
+msgid_plural "Synchronized {count} items"
+msgstr[0] "{count} élément synchronisé"
+msgstr[1] "{count} éléments synchronisés"
+
+#: src/application.rs:822
+msgid "Synchronization stopped"
+msgstr "Synchronisation arrêtée"
+
+#: src/application.rs:826 src/application.rs:830
+msgid "Synchronization failed"
+msgstr "Échec de la synchronisation"
+
+#: src/application.rs:851
+msgid "Working…"
+msgstr "Traitement…"
+
+#: src/application.rs:854
+msgid "Finalizing…"
+msgstr "Finalisation…"
+
+#: src/application.rs:869
+msgid "Locate Source Folder"
+msgstr "Localiser le dossier Source"
+
+#: src/application.rs:905
+msgid "Changed in Source → Briefcase"
+msgstr "Modifié dans la Source → Mallette"
+
+#: src/application.rs:906
+msgid "Changed in Briefcase → Source"
+msgstr "Modifié dans la Mallette → Source"
+
+#: src/application.rs:907
+msgid "Deleted in Briefcase → delete from Source"
+msgstr "Supprimé dans la Mallette → supprimer de la Source"
+
+#: src/application.rs:908
+msgid "Deleted in Source → delete from Briefcase"
+msgstr "Supprimé dans la Source → supprimer de la Mallette"
+
+#: src/application.rs:909
+msgid "Deleted from both copies"
+msgstr "Supprimé des deux copies"
+
+#: src/application.rs:910
+msgid "Equal content on both sides"
+msgstr "Contenu identique des deux côtés"
+
+#: src/application.rs:911
+msgid "Conflict"
+msgstr "Conflit"
+
+#: src/application.rs:951 src/application.rs:1079
+msgid "Preferences"
+msgstr "Préférences"
+
+#: src/application.rs:952
+msgid "Help"
+msgstr "Aide"
+
+#: src/application.rs:953
+msgid "About Briefcase"
+msgstr "À propos de Mallette"
+
+#: src/application.rs:957
+msgid "Main Menu"
+msgstr "Menu principal"
+
+#: src/application.rs:975
+msgid "Synchronization"
+msgstr "Synchronisation"
+
+#: src/application.rs:978
+msgid "Ask Every Time"
+msgstr "Toujours demander"
+
+#: src/application.rs:984 src/application.rs:1084
+msgid "When a file is deleted"
+msgstr "Lorsqu’un fichier est supprimé"
+
+#: src/application.rs:985
+msgid "Choose the default synchronization action"
+msgstr "Choisissez l’action de synchronisation par défaut"
+
+#: src/application.rs:1004
+msgid "Fast"
+msgstr "Rapide"
+
+#: src/application.rs:1005
+msgid "Verified"
+msgstr "Vérifié"
+
+#: src/application.rs:1008 src/application.rs:1090
+msgid "Change detection"
+msgstr "Détection des modifications"
+
+#: src/application.rs:1009
+msgid "Verified mode hashes every file"
+msgstr "Le mode Vérifié calcule l’empreinte de chaque fichier"
+
+#: src/application.rs:1043
+msgid "Briefcase Help"
+msgstr "Aide de Mallette"
+
+#: src/application.rs:1047
+msgid "Quick Guide"
+msgstr "Guide rapide"
+
+#: src/application.rs:1049
+msgid ""
+"Briefcase synchronizes a Source folder with a portable Briefcase folder only "
+"when you ask it to."
+msgstr ""
+"Mallette synchronise un dossier Source avec un dossier Mallette portable "
+"uniquement à votre demande."
+
+#: src/application.rs:1055
+msgid "Create a Briefcase"
+msgstr "Créer une mallette"
+
+#: src/application.rs:1056
+msgid "Choose the Source first, then a destination such as a USB drive."
+msgstr ""
+"Choisissez d’abord la Source, puis une destination telle qu’un disque USB."
+
+#: src/application.rs:1061
+msgid "Open a Briefcase"
+msgstr "Ouvrir une mallette"
+
+#: src/application.rs:1062
+msgid "Open an existing Briefcase folder to add it to the home screen."
+msgstr ""
+"Ouvrez un dossier Mallette existant pour l’ajouter à l’écran d’accueil."
+
+#: src/application.rs:1067
+msgid "Check and Synchronize"
+msgstr "Vérifier et synchroniser"
+
+#: src/application.rs:1068
+msgid ""
+"Check previews changes. Review conflicts, then choose Synchronize to apply "
+"them."
+msgstr ""
+"Vérifier affiche les modifications prévues. Examinez les conflits, puis "
+"choisissez Synchroniser pour les appliquer."
+
+#: src/application.rs:1073
+msgid "Resolve Conflicts"
+msgstr "Résoudre les conflits"
+
+#: src/application.rs:1074
+msgid ""
+"Choose which copy to keep, accept a deletion, or leave the item unchanged."
+msgstr ""
+"Choisissez la copie à conserver, acceptez une suppression ou laissez "
+"l’élément inchangé."
+
+#: src/application.rs:1085
+msgid ""
+"Ask what to do, skip it, restore the deleted file, or delete the other copy."
+msgstr ""
+"Demander quoi faire, ignorer, restaurer le fichier supprimé ou supprimer "
+"l’autre copie."
+
+#: src/application.rs:1091
+msgid ""
+"Fast mode uses saved file details; Verified mode hashes every file for "
+"greater certainty."
+msgstr ""
+"Le mode Rapide utilise les informations enregistrées ; le mode Vérifié "
+"calcule l’empreinte de chaque fichier pour plus de certitude."
+
+#: src/application.rs:1136
+msgid "Could not access {path}: {error}"
+msgstr "Impossible d’accéder à {path} : {error}"
+
+#: src/application.rs:1140
+msgid "The folder is not a valid Briefcase: {path}"
+msgstr "Le dossier n’est pas une mallette valide : {path}"
+
+#: src/application.rs:1144
+msgid "The destination folder already exists and is not empty: {path}"
+msgstr "Le dossier de destination existe déjà et n’est pas vide : {path}"
+
+#: src/application.rs:1148
+msgid "The Source and Briefcase folders cannot contain one another"
+msgstr ""
+"Les dossiers Source et Mallette ne peuvent pas se contenir mutuellement"
+
+#: src/application.rs:1151
+msgid "The path “{path}” does not remain inside the synchronized folder"
+msgstr "Le chemin « {path} » ne reste pas dans le dossier synchronisé"
+
+#: src/application.rs:1155
+msgid "Symbolic links are not supported yet: {path}"
+msgstr "Les liens symboliques ne sont pas encore pris en charge : {path}"
+
+#: src/application.rs:1159
+msgid "Another synchronization is modifying this Briefcase"
+msgstr "Une autre synchronisation modifie cette mallette"
+
+#: src/application.rs:1161
+msgid "Synchronization was stopped"
+msgstr "La synchronisation a été arrêtée"
+
+#: src/application.rs:1163
+msgid "The Source is unavailable: {path}"
+msgstr "La source est indisponible : {path}"
+
+#: src/application.rs:1166
+msgid "Unresolved conflict: {path}"
+msgstr "Conflit non résolu : {path}"
+
+#: src/application.rs:1169
+msgid "Database error: {error}"
+msgstr "Erreur de base de données : {error}"
+
+#: src/application.rs:1171
+msgid "Invalid Briefcase metadata: {error}"
+msgstr "Métadonnées de mallette non valides : {error}"
+
+#~ msgid "Confirm deletions"
+#~ msgstr "Confirmer les suppressions"
+
+#~ msgid "Cancel"
+#~ msgstr "Annuler"
+
+#~ msgid "Shows a warning before synchronization deletes files."
+#~ msgstr ""
+#~ "Affiche un avertissement avant que la synchronisation ne supprime des "
+#~ "fichiers."

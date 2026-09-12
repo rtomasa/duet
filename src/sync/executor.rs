@@ -57,27 +57,71 @@ fn order_key(op: &PlannedOperation) -> (u8, usize, PathBuf) {
     (phase, depth_order, op.relative_path.clone())
 }
 
-pub fn apply_one(source_root: &Path, briefcase_root: &Path, op: &PlannedOperation) -> Result<()> {
+pub fn apply_one_with_progress(
+    source_root: &Path,
+    briefcase_root: &Path,
+    op: &PlannedOperation,
+    progress: &mut dyn FnMut(u64, u64),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
+    check_cancelled(is_cancelled)?;
     match op.action {
         SyncAction::SourceToBriefcase => {
-            copy_entry(source_root, briefcase_root, &op.relative_path, op.kind)
+            copy_entry(
+                source_root,
+                briefcase_root,
+                &op.relative_path,
+                op.kind,
+                progress,
+                is_cancelled,
+            )
         }
         SyncAction::BriefcaseToSource => {
-            copy_entry(briefcase_root, source_root, &op.relative_path, op.kind)
+            copy_entry(
+                briefcase_root,
+                source_root,
+                &op.relative_path,
+                op.kind,
+                progress,
+                is_cancelled,
+            )
         }
-        SyncAction::DeleteSource => delete_entry(source_root, &op.relative_path, op.kind),
-        SyncAction::DeleteBriefcase => delete_entry(briefcase_root, &op.relative_path, op.kind),
-        SyncAction::None | SyncAction::Adopt | SyncAction::RemoveBaseline => Ok(()),
+        SyncAction::DeleteSource => {
+            let result = delete_entry(source_root, &op.relative_path, op.kind);
+            if result.is_ok() {
+                progress(1, 1);
+            }
+            result
+        }
+        SyncAction::DeleteBriefcase => {
+            let result = delete_entry(briefcase_root, &op.relative_path, op.kind);
+            if result.is_ok() {
+                progress(1, 1);
+            }
+            result
+        }
+        SyncAction::None | SyncAction::Adopt | SyncAction::RemoveBaseline => {
+            progress(1, 1);
+            Ok(())
+        }
         SyncAction::Conflict => Err(BriefcaseError::UnresolvedConflict(op.relative_path.clone())),
     }
 }
 
-fn copy_entry(from_root: &Path, to_root: &Path, relative: &Path, kind: EntryKind) -> Result<()> {
+fn copy_entry(
+    from_root: &Path,
+    to_root: &Path,
+    relative: &Path,
+    kind: EntryKind,
+    progress: &mut dyn FnMut(u64, u64),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
     let from = checked_existing(from_root, relative)?;
     let to = checked_destination(to_root, relative)?;
     if kind == EntryKind::Directory {
         fs::create_dir_all(&to).map_err(|e| BriefcaseError::io(&to, e))?;
         checked_parent(to_root, &to)?;
+        progress(1, 1);
         return Ok(());
     }
     if fs::symlink_metadata(&from)
@@ -95,6 +139,8 @@ fn copy_entry(from_root: &Path, to_root: &Path, relative: &Path, kind: EntryKind
 
     let mut input = File::open(&from).map_err(|e| BriefcaseError::io(&from, e))?;
     let metadata = input.metadata().map_err(|e| BriefcaseError::io(&from, e))?;
+    let total = metadata.len();
+    progress(0, total);
     let mut temporary = tempfile::Builder::new()
         .prefix(".briefcase-tmp-")
         .tempfile_in(parent)
@@ -102,6 +148,7 @@ fn copy_entry(from_root: &Path, to_root: &Path, relative: &Path, kind: EntryKind
     let mut buffer = [0_u8; 1024 * 1024];
     let mut written = 0_u64;
     loop {
+        check_cancelled(is_cancelled)?;
         let count = input
             .read(&mut buffer)
             .map_err(|e| BriefcaseError::io(&from, e))?;
@@ -112,7 +159,9 @@ fn copy_entry(from_root: &Path, to_root: &Path, relative: &Path, kind: EntryKind
             .write_all(&buffer[..count])
             .map_err(|e| BriefcaseError::io(&to, e))?;
         written += count as u64;
+        progress(written, total);
     }
+    check_cancelled(is_cancelled)?;
     temporary.flush().map_err(|e| BriefcaseError::io(&to, e))?;
     temporary
         .as_file()
@@ -120,7 +169,7 @@ fn copy_entry(from_root: &Path, to_root: &Path, relative: &Path, kind: EntryKind
         .map_err(|e| BriefcaseError::io(&to, e))?;
     if written != metadata.len() {
         return Err(BriefcaseError::Other(anyhow::anyhow!(
-            "El tamaño copiado de {} no coincide con el original",
+            "The copied size of {} does not match the original",
             relative.display()
         )));
     }
@@ -132,6 +181,14 @@ fn copy_entry(from_root: &Path, to_root: &Path, relative: &Path, kind: EntryKind
         filetime::set_file_mtime(&to, time).map_err(|e| BriefcaseError::io(&to, e))?;
     }
     Ok(())
+}
+
+fn check_cancelled(is_cancelled: &dyn Fn() -> bool) -> Result<()> {
+    if is_cancelled() {
+        Err(BriefcaseError::Cancelled)
+    } else {
+        Ok(())
+    }
 }
 
 fn delete_entry(root: &Path, relative: &Path, kind: EntryKind) -> Result<()> {

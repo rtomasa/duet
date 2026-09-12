@@ -1,0 +1,505 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-briefcase 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-12 16:05+0200\n"
+"PO-Revision-Date: 2026-09-12 00:00+0200\n"
+"Last-Translator: GNOME Briefcase contributors\n"
+"Language-Team: de\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:3
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:4 src/application.rs:40
+#: src/application.rs:67 src/application.rs:124 src/application.rs:154
+#: src/application.rs:345 src/application.rs:724 src/application.rs:1109
+msgid "Briefcase"
+msgstr "Aktenkoffer"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:4
+msgid "Synchronize two folders explicitly and locally"
+msgstr "Zwei Ordner ausdrücklich und lokal synchronisieren"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:10
+msgid "sync;folder;USB;backup;briefcase;"
+msgstr "synchronisieren;Ordner;USB;Sicherung;Aktenkoffer;"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:5
+msgid "Understandable, local folder synchronization"
+msgstr "Verständliche, lokale Ordnersynchronisierung"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:9 src/application.rs:1112
+msgid "GNOME Briefcase contributors"
+msgstr "Mitwirkende an GNOME Aktenkoffer"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:12
+msgid ""
+"Briefcase keeps a source folder and a portable copy synchronized. It scans "
+"only when asked and shows the direction of every change before updating "
+"anything."
+msgstr ""
+"Aktenkoffer hält einen Quellordner und eine tragbare Kopie synchron. Er "
+"prüft nur auf Anforderung und zeigt vor jeder Änderung deren Richtung."
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:13
+msgid ""
+"Conflicts are never settled using timestamps. Choose the Source copy, the "
+"Briefcase copy, or leave the file unchanged."
+msgstr ""
+"Konflikte werden nie anhand von Zeitstempeln gelöst. Wählen Sie die "
+"Quellkopie, die Aktenkofferkopie oder lassen Sie die Datei unverändert."
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:24
+msgid "Initial development release."
+msgstr "Erste Entwicklungsversion."
+
+#: src/application.rs:69
+msgid "Keep two folders synchronized explicitly and locally"
+msgstr "Zwei Ordner ausdrücklich und lokal synchron halten"
+
+#: src/application.rs:74
+msgid "_Create Briefcase"
+msgstr "Aktenkoffer _erstellen"
+
+#: src/application.rs:77
+msgid "Choose a source and a portable destination"
+msgstr "Quelle und tragbares Ziel auswählen"
+
+#: src/application.rs:79
+msgid "_Open Briefcase"
+msgstr "Aktenkoffer ö_ffnen"
+
+#: src/application.rs:80
+msgid "Open an existing Briefcase folder"
+msgstr "Vorhandenen Aktenkofferordner öffnen"
+
+#: src/application.rs:87
+msgid "Your Briefcases"
+msgstr "Ihre Aktenkoffer"
+
+#: src/application.rs:89
+msgid "Briefcases stay listed even when a removable drive is disconnected"
+msgstr "Aktenkoffer bleiben auch bei getrenntem Wechseldatenträger aufgelistet"
+
+#: src/application.rs:160
+msgid "Folder unavailable"
+msgstr "Ordner nicht verfügbar"
+
+#: src/application.rs:177
+msgid "Remove from the list"
+msgstr "Aus der Liste entfernen"
+
+#: src/application.rs:203
+msgid ""
+"The folder {path} is not available. It may be on a disconnected drive. Do "
+"you want to remove it from the list?"
+msgstr ""
+"Der Ordner {path} ist nicht verfügbar. Er könnte auf einem getrennten "
+"Laufwerk liegen. Soll er aus der Liste entfernt werden?"
+
+#: src/application.rs:206
+msgid "Briefcase unavailable"
+msgstr "Aktenkoffer nicht verfügbar"
+
+#: src/application.rs:208
+msgid "Keep"
+msgstr "Behalten"
+
+#: src/application.rs:209
+msgid "Remove from List"
+msgstr "Aus Liste entfernen"
+
+#: src/application.rs:227
+msgid "Open Briefcase"
+msgstr "Aktenkoffer öffnen"
+
+#: src/application.rs:248
+msgid "Select Source Folder"
+msgstr "Quellordner auswählen"
+
+#: src/application.rs:260
+msgid "Choose Briefcase Destination"
+msgstr "Ziel für den Aktenkoffer auswählen"
+
+#: src/application.rs:287 src/application.rs:467 src/application.rs:833
+#: src/application.rs:897
+msgid "The background operation stopped unexpectedly"
+msgstr "Der Hintergrundvorgang wurde unerwartet beendet"
+
+#: src/application.rs:334
+msgid "Source unavailable"
+msgstr "Quelle nicht verfügbar"
+
+#: src/application.rs:339 src/application.rs:722
+msgid "Source"
+msgstr "Quelle"
+
+#: src/application.rs:351
+msgid "Ready to check"
+msgstr "Bereit zum Prüfen"
+
+#: src/application.rs:366
+msgid "_Check Again"
+msgstr "Erneut _prüfen"
+
+#: src/application.rs:367
+msgid "_Stop"
+msgstr "_Anhalten"
+
+#: src/application.rs:370
+msgid "_Synchronize"
+msgstr "_Synchronisieren"
+
+#: src/application.rs:403
+msgid "_Locate Source…"
+msgstr "_Quelle suchen…"
+
+#: src/application.rs:441
+msgid "Checking folders…"
+msgstr "Ordner werden geprüft…"
+
+#: src/application.rs:460 src/application.rs:464
+msgid "Check failed"
+msgstr "Prüfung fehlgeschlagen"
+
+#: src/application.rs:480
+msgid "Stopping…"
+msgstr "Wird angehalten…"
+
+#: src/application.rs:481
+msgid "Stopping synchronization…"
+msgstr "Synchronisierung wird angehalten…"
+
+#: src/application.rs:488 src/application.rs:776
+msgid "Stop"
+msgstr "Anhalten"
+
+#: src/application.rs:500
+msgid "{count} change"
+msgid_plural "{count} changes"
+msgstr[0] "{count} Änderung"
+msgstr[1] "{count} Änderungen"
+
+#: src/application.rs:503
+msgid "{count} conflict"
+msgid_plural "{count} conflicts"
+msgstr[0] "{count} Konflikt"
+msgstr[1] "{count} Konflikte"
+
+#: src/application.rs:531 src/application.rs:912
+msgid "Synchronized"
+msgstr "Synchronisiert"
+
+#: src/application.rs:532
+msgid "No changes found"
+msgstr "Keine Änderungen gefunden"
+
+#: src/application.rs:538
+msgid "Synchronize Non-conflicting Files"
+msgstr "Konfliktfreie Dateien synchronisieren"
+
+#: src/application.rs:540
+msgid "Synchronize"
+msgstr "Synchronisieren"
+
+#: src/application.rs:567
+msgid "Both copies changed — skipped until you choose"
+msgstr "Beide Kopien wurden geändert — bis zur Auswahl übersprungen"
+
+#: src/application.rs:577
+msgid "Keep Source"
+msgstr "Quelle behalten"
+
+#: src/application.rs:578
+msgid "Will keep Source"
+msgstr "Quelle behalten"
+
+#: src/application.rs:585
+msgid "Open Source Copy"
+msgstr "Quellkopie öffnen"
+
+#: src/application.rs:593
+msgid "Keep Briefcase"
+msgstr "Aktenkoffer behalten"
+
+#: src/application.rs:594
+msgid "Will keep Briefcase"
+msgstr "Aktenkoffer behalten"
+
+#: src/application.rs:601
+msgid "Open Briefcase Copy"
+msgstr "Aktenkofferkopie öffnen"
+
+#: src/application.rs:609
+msgid "Accept Deletion"
+msgstr "Löschen übernehmen"
+
+#: src/application.rs:610
+msgid "Will accept deletion"
+msgstr "Löschen übernehmen"
+
+#: src/application.rs:727
+msgid ""
+"{path} was deleted from {location}. Choose what to do with the remaining "
+"copy."
+msgstr ""
+"{path} wurde aus {location} gelöscht. Wählen Sie, was mit der verbleibenden "
+"Kopie geschehen soll."
+
+#: src/application.rs:731
+msgid "File Deleted"
+msgstr "Datei gelöscht"
+
+#: src/application.rs:733 src/application.rs:979
+msgid "Skip"
+msgstr "Überspringen"
+
+#: src/application.rs:734 src/application.rs:980
+msgid "Restore Deleted File"
+msgstr "Gelöschte Datei wiederherstellen"
+
+#: src/application.rs:735 src/application.rs:981
+msgid "Delete Other Copy"
+msgstr "Andere Kopie löschen"
+
+#: src/application.rs:741
+msgid "Do not ask again for remaining deletions"
+msgstr "Bei weiteren Löschungen nicht erneut fragen"
+
+#: src/application.rs:773
+msgid "Synchronizing…"
+msgstr "Synchronisierung läuft…"
+
+#: src/application.rs:812
+msgid "Synchronized {count} item"
+msgid_plural "Synchronized {count} items"
+msgstr[0] "{count} Element synchronisiert"
+msgstr[1] "{count} Elemente synchronisiert"
+
+#: src/application.rs:822
+msgid "Synchronization stopped"
+msgstr "Synchronisierung angehalten"
+
+#: src/application.rs:826 src/application.rs:830
+msgid "Synchronization failed"
+msgstr "Synchronisierung fehlgeschlagen"
+
+#: src/application.rs:851
+msgid "Working…"
+msgstr "In Bearbeitung…"
+
+#: src/application.rs:854
+msgid "Finalizing…"
+msgstr "Wird abgeschlossen…"
+
+#: src/application.rs:869
+msgid "Locate Source Folder"
+msgstr "Quellordner suchen"
+
+#: src/application.rs:905
+msgid "Changed in Source → Briefcase"
+msgstr "In der Quelle geändert → Aktenkoffer"
+
+#: src/application.rs:906
+msgid "Changed in Briefcase → Source"
+msgstr "Im Aktenkoffer geändert → Quelle"
+
+#: src/application.rs:907
+msgid "Deleted in Briefcase → delete from Source"
+msgstr "Im Aktenkoffer gelöscht → aus Quelle löschen"
+
+#: src/application.rs:908
+msgid "Deleted in Source → delete from Briefcase"
+msgstr "In der Quelle gelöscht → aus Aktenkoffer löschen"
+
+#: src/application.rs:909
+msgid "Deleted from both copies"
+msgstr "Aus beiden Kopien gelöscht"
+
+#: src/application.rs:910
+msgid "Equal content on both sides"
+msgstr "Gleicher Inhalt auf beiden Seiten"
+
+#: src/application.rs:911
+msgid "Conflict"
+msgstr "Konflikt"
+
+#: src/application.rs:951 src/application.rs:1079
+msgid "Preferences"
+msgstr "Einstellungen"
+
+#: src/application.rs:952
+msgid "Help"
+msgstr "Hilfe"
+
+#: src/application.rs:953
+msgid "About Briefcase"
+msgstr "Info zu Aktenkoffer"
+
+#: src/application.rs:957
+msgid "Main Menu"
+msgstr "Hauptmenü"
+
+#: src/application.rs:975
+msgid "Synchronization"
+msgstr "Synchronisierung"
+
+#: src/application.rs:978
+msgid "Ask Every Time"
+msgstr "Jedes Mal fragen"
+
+#: src/application.rs:984 src/application.rs:1084
+msgid "When a file is deleted"
+msgstr "Wenn eine Datei gelöscht wurde"
+
+#: src/application.rs:985
+msgid "Choose the default synchronization action"
+msgstr "Standardaktion für die Synchronisierung auswählen"
+
+#: src/application.rs:1004
+msgid "Fast"
+msgstr "Schnell"
+
+#: src/application.rs:1005
+msgid "Verified"
+msgstr "Überprüft"
+
+#: src/application.rs:1008 src/application.rs:1090
+msgid "Change detection"
+msgstr "Änderungserkennung"
+
+#: src/application.rs:1009
+msgid "Verified mode hashes every file"
+msgstr "Der überprüfte Modus bildet Prüfsummen aller Dateien"
+
+#: src/application.rs:1043
+msgid "Briefcase Help"
+msgstr "Aktenkoffer-Hilfe"
+
+#: src/application.rs:1047
+msgid "Quick Guide"
+msgstr "Kurzanleitung"
+
+#: src/application.rs:1049
+msgid ""
+"Briefcase synchronizes a Source folder with a portable Briefcase folder only "
+"when you ask it to."
+msgstr ""
+"Aktenkoffer synchronisiert einen Quellordner nur auf Anforderung mit einem "
+"tragbaren Aktenkofferordner."
+
+#: src/application.rs:1055
+msgid "Create a Briefcase"
+msgstr "Aktenkoffer erstellen"
+
+#: src/application.rs:1056
+msgid "Choose the Source first, then a destination such as a USB drive."
+msgstr "Wählen Sie zuerst die Quelle und dann ein Ziel wie ein USB-Laufwerk."
+
+#: src/application.rs:1061
+msgid "Open a Briefcase"
+msgstr "Aktenkoffer öffnen"
+
+#: src/application.rs:1062
+msgid "Open an existing Briefcase folder to add it to the home screen."
+msgstr ""
+"Öffnen Sie einen vorhandenen Aktenkofferordner, um ihn zur Startseite "
+"hinzuzufügen."
+
+#: src/application.rs:1067
+msgid "Check and Synchronize"
+msgstr "Prüfen und synchronisieren"
+
+#: src/application.rs:1068
+msgid ""
+"Check previews changes. Review conflicts, then choose Synchronize to apply "
+"them."
+msgstr ""
+"Prüfen zeigt die Änderungen in einer Vorschau. Prüfen Sie Konflikte und "
+"wählen Sie dann Synchronisieren."
+
+#: src/application.rs:1073
+msgid "Resolve Conflicts"
+msgstr "Konflikte lösen"
+
+#: src/application.rs:1074
+msgid ""
+"Choose which copy to keep, accept a deletion, or leave the item unchanged."
+msgstr ""
+"Wählen Sie die zu behaltende Kopie, übernehmen Sie eine Löschung oder lassen "
+"Sie das Element unverändert."
+
+#: src/application.rs:1085
+msgid ""
+"Ask what to do, skip it, restore the deleted file, or delete the other copy."
+msgstr ""
+"Nachfragen, überspringen, die gelöschte Datei wiederherstellen oder die "
+"andere Kopie löschen."
+
+#: src/application.rs:1091
+msgid ""
+"Fast mode uses saved file details; Verified mode hashes every file for "
+"greater certainty."
+msgstr ""
+"Der schnelle Modus nutzt gespeicherte Dateidaten; der überprüfte Modus "
+"bildet für mehr Sicherheit Prüfsummen aller Dateien."
+
+#: src/application.rs:1136
+msgid "Could not access {path}: {error}"
+msgstr "Zugriff auf {path} nicht möglich: {error}"
+
+#: src/application.rs:1140
+msgid "The folder is not a valid Briefcase: {path}"
+msgstr "Der Ordner ist kein gültiger Aktenkoffer: {path}"
+
+#: src/application.rs:1144
+msgid "The destination folder already exists and is not empty: {path}"
+msgstr "Der Zielordner ist bereits vorhanden und nicht leer: {path}"
+
+#: src/application.rs:1148
+msgid "The Source and Briefcase folders cannot contain one another"
+msgstr "Quell- und Aktenkofferordner dürfen einander nicht enthalten"
+
+#: src/application.rs:1151
+msgid "The path “{path}” does not remain inside the synchronized folder"
+msgstr "Der Pfad „{path}“ liegt nicht im synchronisierten Ordner"
+
+#: src/application.rs:1155
+msgid "Symbolic links are not supported yet: {path}"
+msgstr "Symbolische Verknüpfungen werden noch nicht unterstützt: {path}"
+
+#: src/application.rs:1159
+msgid "Another synchronization is modifying this Briefcase"
+msgstr "Eine andere Synchronisierung verändert diesen Aktenkoffer"
+
+#: src/application.rs:1161
+msgid "Synchronization was stopped"
+msgstr "Synchronisierung wurde angehalten"
+
+#: src/application.rs:1163
+msgid "The Source is unavailable: {path}"
+msgstr "Die Quelle ist nicht verfügbar: {path}"
+
+#: src/application.rs:1166
+msgid "Unresolved conflict: {path}"
+msgstr "Ungelöster Konflikt: {path}"
+
+#: src/application.rs:1169
+msgid "Database error: {error}"
+msgstr "Datenbankfehler: {error}"
+
+#: src/application.rs:1171
+msgid "Invalid Briefcase metadata: {error}"
+msgstr "Ungültige Aktenkoffer-Metadaten: {error}"
+
+#~ msgid "Confirm deletions"
+#~ msgstr "Löschungen bestätigen"
+
+#~ msgid "Cancel"
+#~ msgstr "Abbrechen"
+
+#~ msgid "Shows a warning before synchronization deletes files."
+#~ msgstr "Zeigt eine Warnung, bevor die Synchronisierung Dateien löscht."

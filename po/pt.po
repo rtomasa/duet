@@ -1,0 +1,504 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-briefcase 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-12 16:05+0200\n"
+"PO-Revision-Date: 2026-09-12 00:00+0200\n"
+"Last-Translator: GNOME Briefcase contributors\n"
+"Language-Team: pt\n"
+"Language: pt\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:3
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:4 src/application.rs:40
+#: src/application.rs:67 src/application.rs:124 src/application.rs:154
+#: src/application.rs:345 src/application.rs:724 src/application.rs:1109
+msgid "Briefcase"
+msgstr "Maleta"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:4
+msgid "Synchronize two folders explicitly and locally"
+msgstr "Sincronizar duas pastas de forma explícita e local"
+
+#: data/io.github.rtomasa.Briefcase.desktop.in:10
+msgid "sync;folder;USB;backup;briefcase;"
+msgstr "sincronizar;pasta;USB;cópia de segurança;maleta;"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:5
+msgid "Understandable, local folder synchronization"
+msgstr "Sincronização local de pastas fácil de compreender"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:9 src/application.rs:1112
+msgid "GNOME Briefcase contributors"
+msgstr "Colaboradores da GNOME Maleta"
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:12
+msgid ""
+"Briefcase keeps a source folder and a portable copy synchronized. It scans "
+"only when asked and shows the direction of every change before updating "
+"anything."
+msgstr ""
+"A Maleta mantém sincronizadas uma pasta de origem e uma cópia portátil. Só "
+"verifica quando solicitado e mostra a direção de cada alteração antes de "
+"modificar algo."
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:13
+msgid ""
+"Conflicts are never settled using timestamps. Choose the Source copy, the "
+"Briefcase copy, or leave the file unchanged."
+msgstr ""
+"Os conflitos nunca são resolvidos por datas. Escolha a cópia da Origem, a "
+"cópia da Maleta ou deixe o ficheiro inalterado."
+
+#: data/io.github.rtomasa.Briefcase.metainfo.xml.in:24
+msgid "Initial development release."
+msgstr "Versão inicial de desenvolvimento."
+
+#: src/application.rs:69
+msgid "Keep two folders synchronized explicitly and locally"
+msgstr "Mantenha duas pastas sincronizadas de forma explícita e local"
+
+#: src/application.rs:74
+msgid "_Create Briefcase"
+msgstr "_Criar maleta"
+
+#: src/application.rs:77
+msgid "Choose a source and a portable destination"
+msgstr "Escolha uma origem e um destino portátil"
+
+#: src/application.rs:79
+msgid "_Open Briefcase"
+msgstr "_Abrir maleta"
+
+#: src/application.rs:80
+msgid "Open an existing Briefcase folder"
+msgstr "Abrir uma pasta Maleta existente"
+
+#: src/application.rs:87
+msgid "Your Briefcases"
+msgstr "As suas maletas"
+
+#: src/application.rs:89
+msgid "Briefcases stay listed even when a removable drive is disconnected"
+msgstr ""
+"As maletas permanecem na lista mesmo quando uma unidade amovível está "
+"desligada"
+
+#: src/application.rs:160
+msgid "Folder unavailable"
+msgstr "Pasta indisponível"
+
+#: src/application.rs:177
+msgid "Remove from the list"
+msgstr "Remover da lista"
+
+#: src/application.rs:203
+msgid ""
+"The folder {path} is not available. It may be on a disconnected drive. Do "
+"you want to remove it from the list?"
+msgstr ""
+"A pasta {path} não está disponível. Pode estar numa unidade desligada. "
+"Deseja removê-la da lista?"
+
+#: src/application.rs:206
+msgid "Briefcase unavailable"
+msgstr "Maleta indisponível"
+
+#: src/application.rs:208
+msgid "Keep"
+msgstr "Manter"
+
+#: src/application.rs:209
+msgid "Remove from List"
+msgstr "Remover da lista"
+
+#: src/application.rs:227
+msgid "Open Briefcase"
+msgstr "Abrir maleta"
+
+#: src/application.rs:248
+msgid "Select Source Folder"
+msgstr "Selecionar pasta de Origem"
+
+#: src/application.rs:260
+msgid "Choose Briefcase Destination"
+msgstr "Escolher destino da Maleta"
+
+#: src/application.rs:287 src/application.rs:467 src/application.rs:833
+#: src/application.rs:897
+msgid "The background operation stopped unexpectedly"
+msgstr "A operação em segundo plano parou inesperadamente"
+
+#: src/application.rs:334
+msgid "Source unavailable"
+msgstr "Origem indisponível"
+
+#: src/application.rs:339 src/application.rs:722
+msgid "Source"
+msgstr "Origem"
+
+#: src/application.rs:351
+msgid "Ready to check"
+msgstr "Pronto para verificar"
+
+#: src/application.rs:366
+msgid "_Check Again"
+msgstr "_Verificar novamente"
+
+#: src/application.rs:367
+msgid "_Stop"
+msgstr "_Parar"
+
+#: src/application.rs:370
+msgid "_Synchronize"
+msgstr "_Sincronizar"
+
+#: src/application.rs:403
+msgid "_Locate Source…"
+msgstr "_Localizar Origem…"
+
+#: src/application.rs:441
+msgid "Checking folders…"
+msgstr "A verificar pastas…"
+
+#: src/application.rs:460 src/application.rs:464
+msgid "Check failed"
+msgstr "A verificação falhou"
+
+#: src/application.rs:480
+msgid "Stopping…"
+msgstr "A parar…"
+
+#: src/application.rs:481
+msgid "Stopping synchronization…"
+msgstr "A parar a sincronização…"
+
+#: src/application.rs:488 src/application.rs:776
+msgid "Stop"
+msgstr "Parar"
+
+#: src/application.rs:500
+msgid "{count} change"
+msgid_plural "{count} changes"
+msgstr[0] "{count} alteração"
+msgstr[1] "{count} alterações"
+
+#: src/application.rs:503
+msgid "{count} conflict"
+msgid_plural "{count} conflicts"
+msgstr[0] "{count} conflito"
+msgstr[1] "{count} conflitos"
+
+#: src/application.rs:531 src/application.rs:912
+msgid "Synchronized"
+msgstr "Sincronizado"
+
+#: src/application.rs:532
+msgid "No changes found"
+msgstr "Nenhuma alteração encontrada"
+
+#: src/application.rs:538
+msgid "Synchronize Non-conflicting Files"
+msgstr "Sincronizar ficheiros sem conflitos"
+
+#: src/application.rs:540
+msgid "Synchronize"
+msgstr "Sincronizar"
+
+#: src/application.rs:567
+msgid "Both copies changed — skipped until you choose"
+msgstr "Ambas as cópias mudaram — ignorado até escolher"
+
+#: src/application.rs:577
+msgid "Keep Source"
+msgstr "Manter origem"
+
+#: src/application.rs:578
+msgid "Will keep Source"
+msgstr "Manter origem"
+
+#: src/application.rs:585
+msgid "Open Source Copy"
+msgstr "Abrir cópia da Origem"
+
+#: src/application.rs:593
+msgid "Keep Briefcase"
+msgstr "Manter maleta"
+
+#: src/application.rs:594
+msgid "Will keep Briefcase"
+msgstr "Manter maleta"
+
+#: src/application.rs:601
+msgid "Open Briefcase Copy"
+msgstr "Abrir cópia da Maleta"
+
+#: src/application.rs:609
+msgid "Accept Deletion"
+msgstr "Aceitar eliminação"
+
+#: src/application.rs:610
+msgid "Will accept deletion"
+msgstr "Aceitar eliminação"
+
+#: src/application.rs:727
+msgid ""
+"{path} was deleted from {location}. Choose what to do with the remaining "
+"copy."
+msgstr ""
+"{path} foi eliminado de {location}. Escolha o que fazer com a cópia restante."
+
+#: src/application.rs:731
+msgid "File Deleted"
+msgstr "Ficheiro eliminado"
+
+#: src/application.rs:733 src/application.rs:979
+msgid "Skip"
+msgstr "Ignorar"
+
+#: src/application.rs:734 src/application.rs:980
+msgid "Restore Deleted File"
+msgstr "Restaurar ficheiro eliminado"
+
+#: src/application.rs:735 src/application.rs:981
+msgid "Delete Other Copy"
+msgstr "Eliminar a outra cópia"
+
+#: src/application.rs:741
+msgid "Do not ask again for remaining deletions"
+msgstr "Não perguntar novamente para as eliminações restantes"
+
+#: src/application.rs:773
+msgid "Synchronizing…"
+msgstr "A sincronizar…"
+
+#: src/application.rs:812
+msgid "Synchronized {count} item"
+msgid_plural "Synchronized {count} items"
+msgstr[0] "{count} item sincronizado"
+msgstr[1] "{count} itens sincronizados"
+
+#: src/application.rs:822
+msgid "Synchronization stopped"
+msgstr "Sincronização interrompida"
+
+#: src/application.rs:826 src/application.rs:830
+msgid "Synchronization failed"
+msgstr "A sincronização falhou"
+
+#: src/application.rs:851
+msgid "Working…"
+msgstr "A processar…"
+
+#: src/application.rs:854
+msgid "Finalizing…"
+msgstr "A finalizar…"
+
+#: src/application.rs:869
+msgid "Locate Source Folder"
+msgstr "Localizar pasta de Origem"
+
+#: src/application.rs:905
+msgid "Changed in Source → Briefcase"
+msgstr "Alterado na Origem → Maleta"
+
+#: src/application.rs:906
+msgid "Changed in Briefcase → Source"
+msgstr "Alterado na Maleta → Origem"
+
+#: src/application.rs:907
+msgid "Deleted in Briefcase → delete from Source"
+msgstr "Eliminado na Maleta → eliminar da Origem"
+
+#: src/application.rs:908
+msgid "Deleted in Source → delete from Briefcase"
+msgstr "Eliminado na Origem → eliminar da Maleta"
+
+#: src/application.rs:909
+msgid "Deleted from both copies"
+msgstr "Eliminado de ambas as cópias"
+
+#: src/application.rs:910
+msgid "Equal content on both sides"
+msgstr "Conteúdo igual em ambos os lados"
+
+#: src/application.rs:911
+msgid "Conflict"
+msgstr "Conflito"
+
+#: src/application.rs:951 src/application.rs:1079
+msgid "Preferences"
+msgstr "Preferências"
+
+#: src/application.rs:952
+msgid "Help"
+msgstr "Ajuda"
+
+#: src/application.rs:953
+msgid "About Briefcase"
+msgstr "Acerca da Maleta"
+
+#: src/application.rs:957
+msgid "Main Menu"
+msgstr "Menu principal"
+
+#: src/application.rs:975
+msgid "Synchronization"
+msgstr "Sincronização"
+
+#: src/application.rs:978
+msgid "Ask Every Time"
+msgstr "Perguntar sempre"
+
+#: src/application.rs:984 src/application.rs:1084
+msgid "When a file is deleted"
+msgstr "Quando um ficheiro é eliminado"
+
+#: src/application.rs:985
+msgid "Choose the default synchronization action"
+msgstr "Escolha a ação de sincronização predefinida"
+
+#: src/application.rs:1004
+msgid "Fast"
+msgstr "Rápido"
+
+#: src/application.rs:1005
+msgid "Verified"
+msgstr "Verificado"
+
+#: src/application.rs:1008 src/application.rs:1090
+msgid "Change detection"
+msgstr "Deteção de alterações"
+
+#: src/application.rs:1009
+msgid "Verified mode hashes every file"
+msgstr "O modo verificado calcula o hash de todos os ficheiros"
+
+#: src/application.rs:1043
+msgid "Briefcase Help"
+msgstr "Ajuda da Maleta"
+
+#: src/application.rs:1047
+msgid "Quick Guide"
+msgstr "Guia rápido"
+
+#: src/application.rs:1049
+msgid ""
+"Briefcase synchronizes a Source folder with a portable Briefcase folder only "
+"when you ask it to."
+msgstr ""
+"A Maleta sincroniza uma pasta Origem com uma pasta Maleta portátil apenas "
+"quando solicitado."
+
+#: src/application.rs:1055
+msgid "Create a Briefcase"
+msgstr "Criar uma maleta"
+
+#: src/application.rs:1056
+msgid "Choose the Source first, then a destination such as a USB drive."
+msgstr "Escolha primeiro a Origem e depois um destino, como uma unidade USB."
+
+#: src/application.rs:1061
+msgid "Open a Briefcase"
+msgstr "Abrir uma maleta"
+
+#: src/application.rs:1062
+msgid "Open an existing Briefcase folder to add it to the home screen."
+msgstr "Abra uma pasta Maleta existente para a adicionar ao ecrã inicial."
+
+#: src/application.rs:1067
+msgid "Check and Synchronize"
+msgstr "Verificar e sincronizar"
+
+#: src/application.rs:1068
+msgid ""
+"Check previews changes. Review conflicts, then choose Synchronize to apply "
+"them."
+msgstr ""
+"Verificar pré-visualiza as alterações. Reveja os conflitos e escolha "
+"Sincronizar para os aplicar."
+
+#: src/application.rs:1073
+msgid "Resolve Conflicts"
+msgstr "Resolver conflitos"
+
+#: src/application.rs:1074
+msgid ""
+"Choose which copy to keep, accept a deletion, or leave the item unchanged."
+msgstr ""
+"Escolha a cópia a manter, aceite uma eliminação ou deixe o item inalterado."
+
+#: src/application.rs:1085
+msgid ""
+"Ask what to do, skip it, restore the deleted file, or delete the other copy."
+msgstr ""
+"Perguntar o que fazer, ignorar, restaurar o ficheiro eliminado ou eliminar a "
+"outra cópia."
+
+#: src/application.rs:1091
+msgid ""
+"Fast mode uses saved file details; Verified mode hashes every file for "
+"greater certainty."
+msgstr ""
+"O modo rápido usa detalhes guardados; o modo verificado calcula o hash de "
+"todos os ficheiros para maior certeza."
+
+#: src/application.rs:1136
+msgid "Could not access {path}: {error}"
+msgstr "Não foi possível aceder a {path}: {error}"
+
+#: src/application.rs:1140
+msgid "The folder is not a valid Briefcase: {path}"
+msgstr "A pasta não é uma Maleta válida: {path}"
+
+#: src/application.rs:1144
+msgid "The destination folder already exists and is not empty: {path}"
+msgstr "A pasta de destino já existe e não está vazia: {path}"
+
+#: src/application.rs:1148
+msgid "The Source and Briefcase folders cannot contain one another"
+msgstr "As pastas Origem e Maleta não podem conter-se mutuamente"
+
+#: src/application.rs:1151
+msgid "The path “{path}” does not remain inside the synchronized folder"
+msgstr "O caminho “{path}” não permanece dentro da pasta sincronizada"
+
+#: src/application.rs:1155
+msgid "Symbolic links are not supported yet: {path}"
+msgstr "As ligações simbólicas ainda não são suportadas: {path}"
+
+#: src/application.rs:1159
+msgid "Another synchronization is modifying this Briefcase"
+msgstr "Outra sincronização está a modificar esta maleta"
+
+#: src/application.rs:1161
+msgid "Synchronization was stopped"
+msgstr "A sincronização foi interrompida"
+
+#: src/application.rs:1163
+msgid "The Source is unavailable: {path}"
+msgstr "A Origem não está disponível: {path}"
+
+#: src/application.rs:1166
+msgid "Unresolved conflict: {path}"
+msgstr "Conflito não resolvido: {path}"
+
+#: src/application.rs:1169
+msgid "Database error: {error}"
+msgstr "Erro da base de dados: {error}"
+
+#: src/application.rs:1171
+msgid "Invalid Briefcase metadata: {error}"
+msgstr "Metadados da Maleta inválidos: {error}"
+
+#~ msgid "Confirm deletions"
+#~ msgstr "Confirmar eliminações"
+
+#~ msgid "Cancel"
+#~ msgstr "Cancelar"
+
+#~ msgid "Shows a warning before synchronization deletes files."
+#~ msgstr "Mostra um aviso antes de a sincronização eliminar ficheiros."

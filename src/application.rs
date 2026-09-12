@@ -1,13 +1,17 @@
 use adw::prelude::*;
 use gnome_briefcase::{
-    BriefcaseService, ConflictResolution, EntryKind, PlannedOperation, ScanMode, SyncAction,
-    SyncPlan,
+    BriefcaseError, BriefcaseService, ConflictResolution, EntryKind, PlannedOperation, ScanMode,
+    SyncAction, SyncPlan,
 };
 use gtk::{gio, glib};
+use gettextrs::{gettext, ngettext};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 const APP_ID: &str = "io.github.rtomasa.Briefcase";
 
@@ -21,7 +25,8 @@ struct UiState {
 
 pub fn run() -> glib::ExitCode {
     let _ = gettextrs::setlocale(gettextrs::LocaleCategory::LcAll, "");
-    let _ = gettextrs::bindtextdomain("gnome-briefcase", "/usr/share/locale");
+    let locale_dir = option_env!("GNOME_BRIEFCASE_LOCALEDIR").unwrap_or("/usr/share/locale");
+    let _ = gettextrs::bindtextdomain("gnome-briefcase", locale_dir);
     let _ = gettextrs::textdomain("gnome-briefcase");
     let app = adw::Application::builder().application_id(APP_ID).build();
     install_actions(&app);
@@ -32,7 +37,7 @@ pub fn run() -> glib::ExitCode {
 fn build_window(app: &adw::Application) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Briefcase")
+        .title(&gettext("Briefcase"))
         .default_width(720)
         .default_height(620)
         .build();
@@ -59,49 +64,51 @@ fn home_page(
 
     let status = adw::StatusPage::builder()
         .icon_name("io.github.rtomasa.Briefcase")
-        .title("Briefcase")
-        .description("Keep two folders synchronized explicitly and locally")
+        .title(&gettext("Briefcase"))
+        .description(&gettext(
+            "Keep two folders synchronized explicitly and locally",
+        ))
         .build();
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     actions.set_halign(gtk::Align::Center);
-    let create = gtk::Button::with_mnemonic("_Create Briefcase");
+    let create = gtk::Button::with_mnemonic(&gettext("_Create Briefcase"));
     create.add_css_class("suggested-action");
-    create.set_tooltip_text(Some("Choose a source and a portable destination"));
-    let open = gtk::Button::with_mnemonic("_Open Briefcase");
-    open.set_tooltip_text(Some("Open an existing Briefcase folder"));
+    create.set_tooltip_text(Some(&gettext(
+        "Choose a source and a portable destination",
+    )));
+    let open = gtk::Button::with_mnemonic(&gettext("_Open Briefcase"));
+    open.set_tooltip_text(Some(&gettext("Open an existing Briefcase folder")));
     actions.append(&create);
     actions.append(&open);
     status.set_child(Some(&actions));
     content.append(&status);
 
-    {
-        let settings = settings();
-        let group = adw::PreferencesGroup::builder()
-            .title("Your Briefcases")
-            .build();
-        let mut added = false;
-        for item in settings.strv("known-briefcases") {
-            let root = PathBuf::from(item.as_str());
-            let Ok(service) = BriefcaseService::open(&root) else {
-                continue;
-            };
-            added = true;
-            let row = adw::ActionRow::builder()
-                .title(&service.manifest.name)
-                .subtitle(root.to_string_lossy())
-                .activatable(true)
-                .build();
-            row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-            let nav = navigation.clone();
-            let win = window.clone();
-            let overlay = toasts.clone();
-            row.connect_activated(move |_| open_briefcase(&win, &nav, &overlay, root.clone()));
-            group.add(&row);
-        }
-        if added {
-            content.append(&group);
-        }
-    }
+    let group = adw::PreferencesGroup::builder()
+        .title(&gettext("Your Briefcases"))
+        .description(&gettext(
+            "Briefcases stay listed even when a removable drive is disconnected",
+        ))
+        .build();
+    content.append(&group);
+    let known_rows = Rc::new(RefCell::new(Vec::new()));
+    populate_known_briefcases(
+        &group,
+        &known_rows,
+        window,
+        navigation,
+        toasts,
+    );
+    let settings = settings();
+    let settings_lifetime = settings.clone();
+    let group_copy = group.clone();
+    let rows_copy = known_rows.clone();
+    let win = window.clone();
+    let nav = navigation.clone();
+    let overlay = toasts.clone();
+    settings.connect_changed(Some("known-briefcases"), move |_, _| {
+        let _keep_alive = &settings_lifetime;
+        populate_known_briefcases(&group_copy, &rows_copy, &win, &nav, &overlay);
+    });
 
     let nav = navigation.clone();
     let win = window.clone();
@@ -114,9 +121,101 @@ fn home_page(
 
     toolbar.set_content(Some(&content));
     adw::NavigationPage::builder()
-        .title("Briefcase")
+        .title(&gettext("Briefcase"))
         .child(&toolbar)
         .build()
+}
+
+fn populate_known_briefcases(
+    group: &adw::PreferencesGroup,
+    rows: &Rc<RefCell<Vec<adw::ActionRow>>>,
+    window: &adw::ApplicationWindow,
+    navigation: &adw::NavigationView,
+    toasts: &adw::ToastOverlay,
+) {
+    for row in rows.borrow_mut().drain(..) {
+        group.remove(&row);
+    }
+
+    for item in settings().strv("known-briefcases") {
+        let root = PathBuf::from(item.as_str());
+        let available = root.is_dir();
+        let service = available
+            .then(|| BriefcaseService::open(&root).ok())
+            .flatten();
+        let name = service
+            .as_ref()
+            .map(|service| service.manifest.name.clone())
+            .or_else(|| {
+                root.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToOwned::to_owned)
+            })
+            .unwrap_or_else(|| gettext("Briefcase"));
+        let subtitle = if available {
+            root.to_string_lossy().to_string()
+        } else {
+            format!(
+                "{} — {}",
+                gettext("Folder unavailable"),
+                root.to_string_lossy()
+            )
+        };
+        let row = adw::ActionRow::builder()
+            .title(&name)
+            .subtitle(&subtitle)
+            .activatable(true)
+            .build();
+        row.add_prefix(&gtk::Image::from_icon_name(if available {
+            "folder-symbolic"
+        } else {
+            "dialog-warning-symbolic"
+        }));
+
+        let remove = gtk::Button::builder()
+            .icon_name("edit-delete-symbolic")
+            .tooltip_text(&gettext("Remove from the list"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        let root_to_remove = root.clone();
+        remove.connect_clicked(move |_| forget(&root_to_remove));
+        row.add_suffix(&remove);
+        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+
+        let nav = navigation.clone();
+        let win = window.clone();
+        let overlay = toasts.clone();
+        row.connect_activated(move |_| {
+            if root.is_dir() {
+                open_briefcase(&win, &nav, &overlay, root.clone());
+            } else {
+                confirm_remove_unavailable(&win, root.clone());
+            }
+        });
+        group.add(&row);
+        rows.borrow_mut().push(row);
+    }
+}
+
+fn confirm_remove_unavailable(window: &adw::ApplicationWindow, root: PathBuf) {
+    let message = gettext(
+        "The folder {path} is not available. It may be on a disconnected drive. Do you want to remove it from the list?",
+    )
+    .replace("{path}", &root.to_string_lossy());
+    let dialog = adw::AlertDialog::new(Some(&gettext("Briefcase unavailable")), Some(&message));
+    dialog.add_responses(&[
+        ("keep", &gettext("Keep")),
+        ("remove", &gettext("Remove from List")),
+    ]);
+    dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("keep"));
+    let window = window.clone();
+    glib::spawn_future_local(async move {
+        if dialog.choose_future(&window).await == "remove" {
+            forget(&root);
+        }
+    });
 }
 
 fn choose_existing(
@@ -125,7 +224,7 @@ fn choose_existing(
     toasts: &adw::ToastOverlay,
 ) {
     let dialog = gtk::FileDialog::builder()
-        .title("Open Briefcase")
+        .title(&gettext("Open Briefcase"))
         .modal(true)
         .build();
     let window = window.clone();
@@ -146,7 +245,7 @@ fn choose_source(
     toasts: &adw::ToastOverlay,
 ) {
     let dialog = gtk::FileDialog::builder()
-        .title("Select Source Folder")
+        .title(&gettext("Select Source Folder"))
         .modal(true)
         .build();
     let window = window.clone();
@@ -158,7 +257,7 @@ fn choose_source(
         };
         let Some(source) = folder.path() else { return };
         let destination_dialog = gtk::FileDialog::builder()
-            .title("Choose Briefcase Destination")
+            .title(&gettext("Choose Briefcase Destination"))
             .modal(true)
             .build();
         let Ok(destination) = destination_dialog.select_folder_future(Some(&window)).await else {
@@ -182,8 +281,11 @@ fn choose_source(
         .await;
         match result {
             Ok(Ok(_)) => open_briefcase(&window, &navigation, &toasts, root),
-            Ok(Err(error)) => show_error(&toasts, &error.to_string()),
-            Err(_) => show_error(&toasts, "The background operation stopped unexpectedly"),
+            Ok(Err(error)) => show_error(&toasts, &localized_error(&error)),
+            Err(_) => show_error(
+                &toasts,
+                &gettext("The background operation stopped unexpectedly"),
+            ),
         }
     });
 }
@@ -197,7 +299,7 @@ fn open_briefcase(
     let service = match BriefcaseService::open(&root) {
         Ok(service) => service,
         Err(error) => {
-            show_error(toasts, &error.to_string());
+            show_error(toasts, &localized_error(&error));
             return;
         }
     };
@@ -228,24 +330,25 @@ fn open_briefcase(
             .to_string()
     } else {
         format!(
-            "Source unavailable — {}",
+            "{} — {}",
+            gettext("Source unavailable"),
             service.manifest.source.last_known_path.display()
         )
     };
     let source_row = adw::ActionRow::builder()
-        .title("Source")
+        .title(&gettext("Source"))
         .subtitle(source_subtitle)
         .build();
     locations.add(&source_row);
     locations.add(
         &adw::ActionRow::builder()
-            .title("Briefcase")
+            .title(&gettext("Briefcase"))
             .subtitle(service.briefcase_root.to_string_lossy())
             .build(),
     );
     content.append(&locations);
 
-    let summary = gtk::Label::new(Some("Ready to compare"));
+    let summary = gtk::Label::new(Some(&gettext("Ready to check")));
     summary.set_xalign(0.0);
     summary.add_css_class("title-3");
     content.append(&summary);
@@ -260,11 +363,15 @@ fn open_briefcase(
 
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     buttons.set_halign(gtk::Align::End);
-    let compare = gtk::Button::with_mnemonic("Compare _Again");
-    let sync = gtk::Button::with_mnemonic("_Update");
+    let compare = gtk::Button::with_mnemonic(&gettext("_Check Again"));
+    let stop = gtk::Button::with_mnemonic(&gettext("_Stop"));
+    stop.add_css_class("destructive-action");
+    stop.set_visible(false);
+    let sync = gtk::Button::with_mnemonic(&gettext("_Synchronize"));
     sync.add_css_class("suggested-action");
     sync.set_sensitive(false);
     buttons.append(&compare);
+    buttons.append(&stop);
     buttons.append(&sync);
     content.append(&buttons);
     toolbar.set_content(Some(&content));
@@ -280,14 +387,20 @@ fn open_briefcase(
         state: state.clone(),
         summary: summary.clone(),
         list: changes.clone(),
+        compare_button: compare.clone(),
         sync_button: sync.clone(),
+        stop_button: stop.clone(),
+        cancellation: Rc::new(RefCell::new(None)),
+        operation_rows: Rc::new(RefCell::new(BTreeMap::new())),
     };
     let c = components.clone();
     compare.connect_clicked(move |_| run_compare(c.clone()));
     let c = components.clone();
     sync.connect_clicked(move |_| run_sync(c.clone()));
+    let c = components.clone();
+    stop.connect_clicked(move |_| request_stop(&c));
     if !source_available {
-        let locate = gtk::Button::with_mnemonic("_Locate Source…");
+        let locate = gtk::Button::with_mnemonic(&gettext("_Locate Source…"));
         let c = components.clone();
         let row = source_row.clone();
         locate.connect_clicked(move |_| locate_source(c.clone(), row.clone()));
@@ -303,11 +416,29 @@ struct ViewComponents {
     state: Rc<RefCell<UiState>>,
     summary: gtk::Label,
     list: gtk::ListBox,
+    compare_button: gtk::Button,
     sync_button: gtk::Button,
+    stop_button: gtk::Button,
+    cancellation: Rc<RefCell<Option<Arc<AtomicBool>>>>,
+    operation_rows: Rc<RefCell<BTreeMap<PathBuf, OperationWidgets>>>,
+}
+
+#[derive(Clone)]
+struct OperationWidgets {
+    row: adw::ActionRow,
+    progress: gtk::ProgressBar,
+}
+
+struct SyncProgressEvent {
+    path: PathBuf,
+    completed: u64,
+    total: u64,
+    finished: bool,
 }
 
 fn run_compare(view: ViewComponents) {
-    view.summary.set_text("Comparing folders…");
+    finish_sync_controls(&view);
+    view.summary.set_text(&gettext("Checking folders…"));
     view.sync_button.set_sensitive(false);
     let Some(root) = view.state.borrow().briefcase_root.clone() else {
         return;
@@ -326,66 +457,94 @@ fn run_compare(view: ViewComponents) {
         match result {
             Ok(Ok(plan)) => render_plan(&view, plan),
             Ok(Err(error)) => {
-                view.summary.set_text("Comparison failed");
-                show_error(&view.toasts, &error.to_string());
+                view.summary.set_text(&gettext("Check failed"));
+                show_error(&view.toasts, &localized_error(&error));
             }
             Err(_) => {
-                view.summary.set_text("Comparison failed");
+                view.summary.set_text(&gettext("Check failed"));
                 show_error(
                     &view.toasts,
-                    "The background operation stopped unexpectedly",
+                    &gettext("The background operation stopped unexpectedly"),
                 );
             }
         }
     });
 }
 
+fn request_stop(view: &ViewComponents) {
+    let Some(cancellation) = view.cancellation.borrow().as_ref().cloned() else {
+        return;
+    };
+    cancellation.store(true, Ordering::Relaxed);
+    view.stop_button.set_sensitive(false);
+    view.stop_button.set_label(&gettext("Stopping…"));
+    view.summary.set_text(&gettext("Stopping synchronization…"));
+}
+
+fn finish_sync_controls(view: &ViewComponents) {
+    view.cancellation.borrow_mut().take();
+    view.stop_button.set_visible(false);
+    view.stop_button.set_sensitive(true);
+    view.stop_button.set_label(&gettext("Stop"));
+    view.compare_button.set_sensitive(true);
+}
+
 fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     while let Some(child) = view.list.first_child() {
         view.list.remove(&child);
     }
+    view.operation_rows.borrow_mut().clear();
     view.state.borrow_mut().resolutions.clear();
     let changes = plan.actionable_count();
     let conflicts = plan.conflicts.len();
-    view.summary.set_text(&format!(
-        "{} {} · {} {}",
-        changes,
-        if changes == 1 { "change" } else { "changes" },
-        conflicts,
-        if conflicts == 1 {
-            "conflict"
-        } else {
-            "conflicts"
-        },
-    ));
+    let changes_label = ngettext("{count} change", "{count} changes", changes as u32)
+        .replace("{count}", &changes.to_string());
+    let conflicts_label = ngettext(
+        "{count} conflict",
+        "{count} conflicts",
+        conflicts as u32,
+    )
+    .replace("{count}", &conflicts.to_string());
+    view.summary
+        .set_text(&format!("{changes_label} · {conflicts_label}"));
     for op in plan
         .operations
         .iter()
         .filter(|op| op.action != SyncAction::None)
     {
-        view.list.append(&operation_row(op));
+        let widgets = operation_row(op);
+        view.list.append(&widgets.row);
+        view.operation_rows
+            .borrow_mut()
+            .insert(op.relative_path.clone(), widgets);
     }
     for conflict in &plan.conflicts {
-        view.list.append(&conflict_row(view, conflict));
+        let widgets = conflict_row(view, conflict);
+        view.list.append(&widgets.row);
+        view.operation_rows.borrow_mut().insert(
+            conflict.operation.relative_path.clone(),
+            widgets,
+        );
     }
     if changes == 0 && conflicts == 0 {
         let row = adw::ActionRow::builder()
-            .title("Synchronized")
-            .subtitle("No changes found")
+            .title(&gettext("Synchronized"))
+            .subtitle(&gettext("No changes found"))
             .build();
         row.add_prefix(&gtk::Image::from_icon_name("emblem-ok-symbolic"));
         view.list.append(&row);
     }
-    view.sync_button.set_label(if conflicts > 0 {
-        "Update Non-conflicting Files"
+    let sync_label = if conflicts > 0 {
+        gettext("Synchronize Non-conflicting Files")
     } else {
-        "Update"
-    });
-    view.sync_button.set_sensitive(changes > 0);
+        gettext("Synchronize")
+    };
+    view.sync_button.set_label(&sync_label);
+    view.sync_button.set_sensitive(changes > 0 || conflicts > 0);
     view.state.borrow_mut().plan = Some(plan);
 }
 
-fn operation_row(op: &PlannedOperation) -> adw::ActionRow {
+fn operation_row(op: &PlannedOperation) -> OperationWidgets {
     let row = adw::ActionRow::builder()
         .title(op.relative_path.to_string_lossy())
         .subtitle(action_label(op.action))
@@ -394,13 +553,18 @@ fn operation_row(op: &PlannedOperation) -> adw::ActionRow {
         EntryKind::File => "text-x-generic-symbolic",
         EntryKind::Directory => "folder-symbolic",
     }));
-    row
+    let progress = operation_progress_bar();
+    row.add_suffix(&progress);
+    OperationWidgets { row, progress }
 }
 
-fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> adw::ActionRow {
+fn conflict_row(
+    view: &ViewComponents,
+    conflict: &gnome_briefcase::Conflict,
+) -> OperationWidgets {
     let row = adw::ActionRow::builder()
         .title(conflict.operation.relative_path.to_string_lossy())
-        .subtitle("Both copies changed — skipped until you choose")
+        .subtitle(&gettext("Both copies changed — skipped until you choose"))
         .build();
     row.add_prefix(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
     let source_deleted = conflict.source.is_none();
@@ -410,15 +574,15 @@ fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> 
             &row,
             view,
             &conflict.operation.relative_path,
-            "Keep Source",
-            "Will keep Source",
+            &gettext("Keep Source"),
+            gettext("Will keep Source"),
             ConflictResolution::KeepSource,
         );
         add_open_button(
             &row,
             view.state.borrow().source_root.as_deref(),
             &conflict.operation.relative_path,
-            "Open Source Copy",
+            &gettext("Open Source Copy"),
         );
     }
     if !briefcase_deleted {
@@ -426,15 +590,15 @@ fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> 
             &row,
             view,
             &conflict.operation.relative_path,
-            "Keep Briefcase",
-            "Will keep Briefcase",
+            &gettext("Keep Briefcase"),
+            gettext("Will keep Briefcase"),
             ConflictResolution::KeepBriefcase,
         );
         add_open_button(
             &row,
             view.state.borrow().briefcase_root.as_deref(),
             &conflict.operation.relative_path,
-            "Open Briefcase Copy",
+            &gettext("Open Briefcase Copy"),
         );
     }
     if source_deleted || briefcase_deleted {
@@ -442,12 +606,23 @@ fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> 
             &row,
             view,
             &conflict.operation.relative_path,
-            "Accept Deletion",
-            "Will accept deletion",
+            &gettext("Accept Deletion"),
+            gettext("Will accept deletion"),
             ConflictResolution::AcceptDeletion,
         );
     }
-    row
+    let progress = operation_progress_bar();
+    row.add_suffix(&progress);
+    OperationWidgets { row, progress }
+}
+
+fn operation_progress_bar() -> gtk::ProgressBar {
+    gtk::ProgressBar::builder()
+        .width_request(140)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .show_text(true)
+        .build()
 }
 
 fn add_resolution_button(
@@ -455,7 +630,7 @@ fn add_resolution_button(
     view: &ViewComponents,
     path: &Path,
     label: &str,
-    result_label: &'static str,
+    result_label: String,
     resolution: ConflictResolution,
 ) {
     let button = gtk::Button::with_label(label);
@@ -467,7 +642,7 @@ fn add_resolution_button(
             .borrow_mut()
             .resolutions
             .insert(path.clone(), resolution);
-        row_copy.set_subtitle(result_label);
+        row_copy.set_subtitle(&result_label);
     });
     row.add_suffix(&button);
 }
@@ -496,57 +671,202 @@ fn run_sync(view: ViewComponents) {
     let (Some(plan), Some(root)) = (plan, root) else {
         return;
     };
-    let has_deletions = plan.has_deletions();
-    let perform = move |view: ViewComponents| {
-        view.summary.set_text("Updating…");
-        view.sync_button.set_sensitive(false);
-        glib::spawn_future_local(async move {
-            let result = gio::spawn_blocking(move || {
-                let service = BriefcaseService::open(&root)?;
-                service.synchronize(&plan, &resolutions)
-            })
-            .await;
-            match result {
-                Ok(Ok(outcome)) => {
-                    view.toasts.add_toast(adw::Toast::new(&format!(
-                        "Updated {} items",
-                        outcome.applied
-                    )));
-                    run_compare(view);
-                }
-                Ok(Err(error)) => {
-                    view.summary.set_text("Update failed");
-                    show_error(&view.toasts, &error.to_string());
-                }
-                Err(_) => {
-                    view.summary.set_text("Update failed");
-                    show_error(
-                        &view.toasts,
-                        "The background operation stopped unexpectedly",
-                    );
-                }
-            }
-        });
+    glib::spawn_future_local(async move {
+        if let Some(plan) = prepare_deletions(&view, plan).await {
+            perform_sync(view, plan, root, resolutions);
+        }
+    });
+}
+
+#[derive(Clone, Copy)]
+enum DeletionChoice {
+    Skip,
+    Restore,
+    Delete,
+}
+
+async fn prepare_deletions(view: &ViewComponents, mut plan: SyncPlan) -> Option<SyncPlan> {
+    let policy = settings().string("deletion-action");
+    let fixed_choice = match policy.as_str() {
+        "skip" => Some(DeletionChoice::Skip),
+        "restore" => Some(DeletionChoice::Restore),
+        "delete" => Some(DeletionChoice::Delete),
+        _ => None,
     };
-    if has_deletions && settings().boolean("confirm-deletions") {
-        let dialog = adw::AlertDialog::new(Some("Confirm deletions"), Some("This update removes files from one of the folders. Deleted files cannot be restored by Briefcase."));
-        dialog.add_responses(&[("cancel", "Cancel"), ("update", "Update")]);
-        dialog.set_response_appearance("update", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        let view_copy = view.clone();
-        glib::spawn_future_local(async move {
-            if dialog.choose_future(&view_copy.window).await == "update" {
-                perform(view_copy);
+    let mut choice_for_remaining = fixed_choice;
+    for operation in plan.operations.iter_mut().filter(|operation| {
+        matches!(
+            operation.action,
+            SyncAction::DeleteSource | SyncAction::DeleteBriefcase
+        )
+    }) {
+        let choice = if let Some(choice) = choice_for_remaining {
+            choice
+        } else {
+            let (choice, do_not_ask) = ask_deletion_action(&view.window, operation).await?;
+            if do_not_ask {
+                choice_for_remaining = Some(choice);
             }
-        });
+            choice
+        };
+        apply_deletion_choice(operation, choice);
+    }
+    Some(plan)
+}
+
+async fn ask_deletion_action(
+    window: &adw::ApplicationWindow,
+    operation: &PlannedOperation,
+) -> Option<(DeletionChoice, bool)> {
+    let location = if operation.action == SyncAction::DeleteBriefcase {
+        gettext("Source")
     } else {
-        perform(view);
+        gettext("Briefcase")
+    };
+    let message = gettext(
+        "{path} was deleted from {location}. Choose what to do with the remaining copy.",
+    )
+    .replace("{path}", &operation.relative_path.to_string_lossy())
+    .replace("{location}", &location);
+    let dialog = adw::AlertDialog::new(Some(&gettext("File Deleted")), Some(&message));
+    dialog.add_responses(&[
+        ("skip", &gettext("Skip")),
+        ("restore", &gettext("Restore Deleted File")),
+        ("delete", &gettext("Delete Other Copy")),
+    ]);
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("skip"));
+    dialog.set_close_response("cancel");
+    let do_not_ask = gtk::CheckButton::with_label(&gettext(
+        "Do not ask again for remaining deletions",
+    ));
+    dialog.set_extra_child(Some(&do_not_ask));
+    let response = dialog.choose_future(window).await;
+    let choice = match response.as_str() {
+        "skip" => DeletionChoice::Skip,
+        "restore" => DeletionChoice::Restore,
+        "delete" => DeletionChoice::Delete,
+        _ => return None,
+    };
+    Some((choice, do_not_ask.is_active()))
+}
+
+fn apply_deletion_choice(operation: &mut PlannedOperation, choice: DeletionChoice) {
+    operation.action = match (choice, operation.action) {
+        (DeletionChoice::Skip, _) => SyncAction::None,
+        (DeletionChoice::Restore, SyncAction::DeleteBriefcase) => {
+            SyncAction::BriefcaseToSource
+        }
+        (DeletionChoice::Restore, SyncAction::DeleteSource) => {
+            SyncAction::SourceToBriefcase
+        }
+        (DeletionChoice::Delete, action) | (DeletionChoice::Restore, action) => action,
+    };
+}
+
+fn perform_sync(
+    view: ViewComponents,
+    plan: SyncPlan,
+    root: PathBuf,
+    resolutions: BTreeMap<PathBuf, ConflictResolution>,
+) {
+    view.summary.set_text(&gettext("Synchronizing…"));
+    view.compare_button.set_sensitive(false);
+    view.sync_button.set_sensitive(false);
+    view.stop_button.set_label(&gettext("Stop"));
+    view.stop_button.set_sensitive(true);
+    view.stop_button.set_visible(true);
+    let cancellation = Arc::new(AtomicBool::new(false));
+    *view.cancellation.borrow_mut() = Some(cancellation.clone());
+    let (sender, receiver) = mpsc::channel::<SyncProgressEvent>();
+    let progress_view = view.clone();
+    let progress_source = glib::timeout_add_local(Duration::from_millis(50), move || {
+        while let Ok(event) = receiver.try_recv() {
+            update_operation_progress(&progress_view, event);
+        }
+        glib::ControlFlow::Continue
+    });
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(move || {
+            let service = BriefcaseService::open(&root)?;
+            service.synchronize_with_progress_and_cancel(
+                &plan,
+                &resolutions,
+                move |operation, completed, total, finished| {
+                    let _ = sender.send(SyncProgressEvent {
+                        path: operation.relative_path.clone(),
+                        completed,
+                        total,
+                        finished,
+                    });
+                },
+                move || cancellation.load(Ordering::Relaxed),
+            )
+        })
+        .await;
+        progress_source.remove();
+        finish_sync_controls(&view);
+        match result {
+            Ok(Ok(outcome)) => {
+                let message = ngettext(
+                    "Synchronized {count} item",
+                    "Synchronized {count} items",
+                    outcome.applied as u32,
+                )
+                .replace("{count}", &outcome.applied.to_string());
+                view.toasts.add_toast(adw::Toast::new(&message));
+                run_compare(view);
+            }
+            Ok(Err(BriefcaseError::Cancelled)) => {
+                view.toasts
+                    .add_toast(adw::Toast::new(&gettext("Synchronization stopped")));
+                run_compare(view);
+            }
+            Ok(Err(error)) => {
+                view.summary.set_text(&gettext("Synchronization failed"));
+                show_error(&view.toasts, &localized_error(&error));
+            }
+            Err(_) => {
+                view.summary.set_text(&gettext("Synchronization failed"));
+                show_error(
+                    &view.toasts,
+                    &gettext("The background operation stopped unexpectedly"),
+                );
+            }
+        }
+    });
+}
+
+fn update_operation_progress(view: &ViewComponents, event: SyncProgressEvent) {
+    let widgets = view.operation_rows.borrow().get(&event.path).cloned();
+    let Some(widgets) = widgets else { return };
+    if event.finished {
+        view.list.remove(&widgets.row);
+        view.operation_rows.borrow_mut().remove(&event.path);
+        return;
+    }
+    widgets.progress.set_visible(true);
+    if event.total == 0 {
+        widgets.progress.pulse();
+        widgets.progress.set_text(Some(&gettext("Working…")));
+    } else if event.completed >= event.total {
+        widgets.progress.set_fraction(0.9);
+        widgets.progress.set_text(Some(&gettext("Finalizing…")));
+    } else {
+        let fraction = event.completed as f64 / event.total as f64;
+        widgets
+            .progress
+            .set_fraction(fraction * 0.9);
+        widgets.progress.set_text(Some(&format!(
+            "{}%",
+            (fraction * 90.0).round() as u32
+        )));
     }
 }
 
 fn locate_source(view: ViewComponents, row: adw::ActionRow) {
     let dialog = gtk::FileDialog::builder()
-        .title("Locate Source Folder")
+        .title(&gettext("Locate Source Folder"))
         .modal(true)
         .build();
     glib::spawn_future_local(async move {
@@ -571,25 +891,25 @@ fn locate_source(view: ViewComponents, row: adw::ActionRow) {
                 row.set_subtitle(&source.to_string_lossy());
                 run_compare(view);
             }
-            Ok(Err(error)) => show_error(&view.toasts, &error.to_string()),
+            Ok(Err(error)) => show_error(&view.toasts, &localized_error(&error)),
             Err(_) => show_error(
                 &view.toasts,
-                "The background operation stopped unexpectedly",
+                &gettext("The background operation stopped unexpectedly"),
             ),
         }
     });
 }
 
-fn action_label(action: SyncAction) -> &'static str {
+fn action_label(action: SyncAction) -> String {
     match action {
-        SyncAction::SourceToBriefcase => "Changed in Source → Briefcase",
-        SyncAction::BriefcaseToSource => "Changed in Briefcase → Source",
-        SyncAction::DeleteSource => "Deleted in Briefcase → delete from Source",
-        SyncAction::DeleteBriefcase => "Deleted in Source → delete from Briefcase",
-        SyncAction::RemoveBaseline => "Deleted from both copies",
-        SyncAction::Adopt => "Equal content on both sides",
-        SyncAction::Conflict => "Conflict",
-        SyncAction::None => "Synchronized",
+        SyncAction::SourceToBriefcase => gettext("Changed in Source → Briefcase"),
+        SyncAction::BriefcaseToSource => gettext("Changed in Briefcase → Source"),
+        SyncAction::DeleteSource => gettext("Deleted in Briefcase → delete from Source"),
+        SyncAction::DeleteBriefcase => gettext("Deleted in Source → delete from Briefcase"),
+        SyncAction::RemoveBaseline => gettext("Deleted from both copies"),
+        SyncAction::Adopt => gettext("Equal content on both sides"),
+        SyncAction::Conflict => gettext("Conflict"),
+        SyncAction::None => gettext("Synchronized"),
     }
 }
 
@@ -612,15 +932,29 @@ fn remember(root: &Path) {
     let _ = settings.set_strv("known-briefcases", refs);
 }
 
+fn forget(root: &Path) {
+    let settings = settings();
+    let value = root.to_string_lossy();
+    let values: Vec<String> = settings
+        .strv("known-briefcases")
+        .iter()
+        .filter(|item| item.as_str() != value)
+        .map(|item| item.to_string())
+        .collect();
+    let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+    let _ = settings.set_strv("known-briefcases", refs);
+}
+
 fn header_bar() -> adw::HeaderBar {
     let header = adw::HeaderBar::new();
     let menu = gio::Menu::new();
-    menu.append(Some("Preferences"), Some("app.preferences"));
-    menu.append(Some("About Briefcase"), Some("app.about"));
+    menu.append(Some(&gettext("Preferences")), Some("app.preferences"));
+    menu.append(Some(&gettext("Help")), Some("app.help"));
+    menu.append(Some(&gettext("About Briefcase")), Some("app.about"));
     let button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .menu_model(&menu)
-        .tooltip_text("Main Menu")
+        .tooltip_text(&gettext("Main Menu"))
         .build();
     header.pack_end(&button);
     header
@@ -638,22 +972,41 @@ fn install_actions(app: &adw::Application) {
             let dialog = adw::PreferencesDialog::new();
             let page = adw::PreferencesPage::new();
             let group = adw::PreferencesGroup::builder()
-                .title("Synchronization")
+                .title(&gettext("Synchronization"))
                 .build();
             let settings = settings();
-            let confirm = adw::SwitchRow::builder()
-                .title("Confirm deletions")
-                .subtitle("Ask before an update removes files")
-                .active(settings.boolean("confirm-deletions"))
+            let ask = gettext("Ask Every Time");
+            let skip = gettext("Skip");
+            let restore = gettext("Restore Deleted File");
+            let delete = gettext("Delete Other Copy");
+            let deletion_actions = gtk::StringList::new(&[&ask, &skip, &restore, &delete]);
+            let deletion = adw::ComboRow::builder()
+                .title(&gettext("When a file is deleted"))
+                .subtitle(&gettext("Choose the default synchronization action"))
+                .model(&deletion_actions)
+                .selected(match settings.string("deletion-action").as_str() {
+                    "skip" => 1,
+                    "restore" => 2,
+                    "delete" => 3,
+                    _ => 0,
+                })
                 .build();
             let settings_copy = settings.clone();
-            confirm.connect_active_notify(move |row| {
-                let _ = settings_copy.set_boolean("confirm-deletions", row.is_active());
+            deletion.connect_selected_notify(move |row| {
+                let value = match row.selected() {
+                    1 => "skip",
+                    2 => "restore",
+                    3 => "delete",
+                    _ => "ask",
+                };
+                let _ = settings_copy.set_string("deletion-action", value);
             });
-            let modes = gtk::StringList::new(&["Fast", "Verified"]);
+            let fast = gettext("Fast");
+            let verified = gettext("Verified");
+            let modes = gtk::StringList::new(&[&fast, &verified]);
             let detection = adw::ComboRow::builder()
-                .title("Change detection")
-                .subtitle("Verified hashes every file")
+                .title(&gettext("Change detection"))
+                .subtitle(&gettext("Verified mode hashes every file"))
                 .model(&modes)
                 .selected(if settings.string("change-detection-mode") == "verified" {
                     1
@@ -669,7 +1022,7 @@ fn install_actions(app: &adw::Application) {
                 };
                 let _ = settings.set_string("change-detection-mode", value);
             });
-            group.add(&confirm);
+            group.add(&deletion);
             group.add(&detection);
             page.add(&group);
             dialog.add(&page);
@@ -677,6 +1030,72 @@ fn install_actions(app: &adw::Application) {
         }
     ));
     app.add_action(&preferences);
+
+    let help = gio::SimpleAction::new("help", None);
+    help.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| {
+            let Some(window) = app.active_window() else {
+                return;
+            };
+            let dialog = adw::PreferencesDialog::new();
+            dialog.set_title(&gettext("Briefcase Help"));
+            let page = adw::PreferencesPage::new();
+
+            let guide = adw::PreferencesGroup::builder()
+                .title(&gettext("Quick Guide"))
+                .description(&gettext(
+                    "Briefcase synchronizes a Source folder with a portable Briefcase folder only when you ask it to.",
+                ))
+                .build();
+            add_help_row(
+                &guide,
+                "document-new-symbolic",
+                &gettext("Create a Briefcase"),
+                &gettext("Choose the Source first, then a destination such as a USB drive."),
+            );
+            add_help_row(
+                &guide,
+                "document-open-symbolic",
+                &gettext("Open a Briefcase"),
+                &gettext("Open an existing Briefcase folder to add it to the home screen."),
+            );
+            add_help_row(
+                &guide,
+                "view-refresh-symbolic",
+                &gettext("Check and Synchronize"),
+                &gettext("Check previews changes. Review conflicts, then choose Synchronize to apply them."),
+            );
+            add_help_row(
+                &guide,
+                "dialog-warning-symbolic",
+                &gettext("Resolve Conflicts"),
+                &gettext("Choose which copy to keep, accept a deletion, or leave the item unchanged."),
+            );
+            page.add(&guide);
+
+            let options = adw::PreferencesGroup::builder()
+                .title(&gettext("Preferences"))
+                .build();
+            add_help_row(
+                &options,
+                "edit-delete-symbolic",
+                &gettext("When a file is deleted"),
+                &gettext("Ask what to do, skip it, restore the deleted file, or delete the other copy."),
+            );
+            add_help_row(
+                &options,
+                "system-search-symbolic",
+                &gettext("Change detection"),
+                &gettext("Fast mode uses saved file details; Verified mode hashes every file for greater certainty."),
+            );
+            page.add(&options);
+            dialog.add(&page);
+            dialog.present(Some(&window));
+        }
+    ));
+    app.add_action(&help);
 
     let about = gio::SimpleAction::new("about", None);
     about.connect_activate(glib::clone!(
@@ -687,10 +1106,10 @@ fn install_actions(app: &adw::Application) {
                 return;
             };
             let dialog = adw::AboutDialog::builder()
-                .application_name("Briefcase")
+                .application_name(&gettext("Briefcase"))
                 .application_icon(APP_ID)
                 .version("0.1.0")
-                .developer_name("GNOME Briefcase contributors")
+                .developer_name(&gettext("GNOME Briefcase contributors"))
                 .license_type(gtk::License::Gpl30)
                 .website("https://github.com/rtomasa/gnome-briefcase")
                 .build();
@@ -703,8 +1122,91 @@ fn install_actions(app: &adw::Application) {
     app.set_accels_for_action("app.quit", &["<primary>q"]);
 }
 
+fn add_help_row(group: &adw::PreferencesGroup, icon: &str, title: &str, subtitle: &str) {
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .subtitle(subtitle)
+        .build();
+    row.add_prefix(&gtk::Image::from_icon_name(icon));
+    group.add(&row);
+}
+
+fn localized_error(error: &BriefcaseError) -> String {
+    match error {
+        BriefcaseError::Io { path, source } => gettext("Could not access {path}: {error}")
+            .replace("{path}", &path.to_string_lossy())
+            .replace("{error}", &source.to_string()),
+        BriefcaseError::InvalidBriefcase(path) => {
+            gettext("The folder is not a valid Briefcase: {path}")
+                .replace("{path}", &path.to_string_lossy())
+        }
+        BriefcaseError::DestinationNotEmpty(path) => gettext(
+            "The destination folder already exists and is not empty: {path}",
+        )
+        .replace("{path}", &path.to_string_lossy()),
+        BriefcaseError::OverlappingRoots => {
+            gettext("The Source and Briefcase folders cannot contain one another")
+        }
+        BriefcaseError::UnsafePath(path) => {
+            gettext("The path “{path}” does not remain inside the synchronized folder")
+                .replace("{path}", &path.to_string_lossy())
+        }
+        BriefcaseError::UnsupportedSymlink(path) => {
+            gettext("Symbolic links are not supported yet: {path}")
+                .replace("{path}", &path.to_string_lossy())
+        }
+        BriefcaseError::AlreadyLocked => {
+            gettext("Another synchronization is modifying this Briefcase")
+        }
+        BriefcaseError::Cancelled => gettext("Synchronization was stopped"),
+        BriefcaseError::SourceUnavailable(path) => {
+            gettext("The Source is unavailable: {path}")
+                .replace("{path}", &path.to_string_lossy())
+        }
+        BriefcaseError::UnresolvedConflict(path) => gettext("Unresolved conflict: {path}")
+            .replace("{path}", &path.to_string_lossy()),
+        BriefcaseError::Database(source) => {
+            gettext("Database error: {error}").replace("{error}", &source.to_string())
+        }
+        BriefcaseError::Manifest(source) => gettext("Invalid Briefcase metadata: {error}")
+            .replace("{error}", &source.to_string()),
+        BriefcaseError::Other(source) => source.to_string(),
+    }
+}
+
 fn show_error(toasts: &adw::ToastOverlay, message: &str) {
     let toast = adw::Toast::new(message);
     toast.set_timeout(8);
     toasts.add_toast(toast);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gnome_briefcase::ChangeState;
+
+    fn deletion(action: SyncAction) -> PlannedOperation {
+        PlannedOperation {
+            relative_path: PathBuf::from("deleted.txt"),
+            kind: EntryKind::File,
+            source_state: ChangeState::Unchanged,
+            briefcase_state: ChangeState::Deleted,
+            action,
+        }
+    }
+
+    #[test]
+    fn deletion_choices_skip_restore_or_propagate_the_deletion() {
+        let mut skipped = deletion(SyncAction::DeleteSource);
+        apply_deletion_choice(&mut skipped, DeletionChoice::Skip);
+        assert_eq!(skipped.action, SyncAction::None);
+
+        let mut restored = deletion(SyncAction::DeleteSource);
+        apply_deletion_choice(&mut restored, DeletionChoice::Restore);
+        assert_eq!(restored.action, SyncAction::SourceToBriefcase);
+
+        let mut deleted = deletion(SyncAction::DeleteSource);
+        apply_deletion_choice(&mut deleted, DeletionChoice::Delete);
+        assert_eq!(deleted.action, SyncAction::DeleteSource);
+    }
 }
