@@ -3,8 +3,13 @@ use crate::{BaselineEntry, BriefcaseError, EntryKind, FileSnapshot, Result};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc;
+use std::thread;
 use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
+
+const MAX_HASH_WORKERS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanMode {
@@ -18,25 +23,33 @@ pub enum ScanSide {
     Briefcase,
 }
 
-pub fn scan(
+pub fn scan_with_progress_and_cancel<F, C>(
     root: &Path,
     side: ScanSide,
     baseline: &BTreeMap<PathBuf, BaselineEntry>,
     mode: ScanMode,
-) -> Result<BTreeMap<PathBuf, FileSnapshot>> {
+    progress: F,
+    is_cancelled: C,
+) -> Result<BTreeMap<PathBuf, FileSnapshot>>
+where
+    F: Fn(u64, u64) + Sync,
+    C: Fn() -> bool + Sync,
+{
     if !root.is_dir() {
         return Err(BriefcaseError::SourceUnavailable(root.to_path_buf()));
     }
-    let mut snapshots = BTreeMap::new();
+    let mut snapshots = Vec::new();
+    let mut hash_tasks = Vec::new();
     let walker = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_entry(|entry| entry.path() == root || entry.file_name() != ".briefcase");
 
     for item in walker {
+        check_cancelled(&is_cancelled)?;
         let item = item.map_err(|e| {
             let path = e.path().unwrap_or(root).to_path_buf();
-            BriefcaseError::io(path, std::io::Error::new(std::io::ErrorKind::Other, e))
+            BriefcaseError::io(path, std::io::Error::other(e))
         })?;
         let path = item.path();
         if path == root {
@@ -46,7 +59,8 @@ pub fn scan(
             .strip_prefix(root)
             .map_err(|_| BriefcaseError::UnsafePath(path.into()))?;
         validate_relative(relative)?;
-        let file_type = item.file_type();
+        let metadata = fs::symlink_metadata(path).map_err(|e| BriefcaseError::io(path, e))?;
+        let file_type = metadata.file_type();
         if file_type.is_symlink() {
             return Err(BriefcaseError::UnsupportedSymlink(relative.to_path_buf()));
         }
@@ -55,7 +69,6 @@ pub fn scan(
         } else {
             EntryKind::File
         };
-        let metadata = fs::symlink_metadata(path).map_err(|e| BriefcaseError::io(path, e))?;
         let mtime_ns = metadata
             .modified()
             .ok()
@@ -79,20 +92,177 @@ pub fn scan(
                 .get(relative)
                 .and_then(|entry| entry.baseline_hash.clone())
         } else {
-            Some(hashing::sha256(path)?)
+            None
         };
-        snapshots.insert(
-            relative.to_path_buf(),
-            FileSnapshot {
-                relative_path: relative.to_path_buf(),
-                kind,
-                size,
-                mtime_ns,
-                hash,
-            },
-        );
+        let snapshot_index = snapshots.len();
+        snapshots.push(FileSnapshot {
+            relative_path: relative.to_path_buf(),
+            kind,
+            size,
+            mtime_ns,
+            hash,
+        });
+        if kind == EntryKind::File && snapshots[snapshot_index].hash.is_none() {
+            hash_tasks.push((snapshot_index, path.to_path_buf(), size.max(1)));
+        }
+        progress(snapshots.len() as u64, 0);
     }
-    Ok(snapshots)
+
+    hash_files(&mut snapshots, &hash_tasks, &progress, &is_cancelled)?;
+    Ok(snapshots
+        .into_iter()
+        .map(|snapshot| (snapshot.relative_path.clone(), snapshot))
+        .collect())
+}
+
+pub fn scan_paths_verified(
+    root: &Path,
+    relative_paths: &[PathBuf],
+) -> Result<BTreeMap<PathBuf, FileSnapshot>> {
+    if !root.is_dir() {
+        return Err(BriefcaseError::SourceUnavailable(root.to_path_buf()));
+    }
+    let mut snapshots = Vec::new();
+    let mut hash_tasks = Vec::new();
+    for relative in relative_paths {
+        validate_relative(relative)?;
+        let path = root.join(relative);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(BriefcaseError::io(&path, error)),
+        };
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            return Err(BriefcaseError::UnsupportedSymlink(relative.clone()));
+        }
+        let kind = if file_type.is_dir() {
+            EntryKind::Directory
+        } else {
+            EntryKind::File
+        };
+        let mtime_ns = metadata
+            .modified()
+            .ok()
+            .and_then(|time| {
+                time.duration_since(UNIX_EPOCH)
+                    .ok()
+                    .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
+            })
+            .unwrap_or(0);
+        let size = if kind == EntryKind::File {
+            metadata.len()
+        } else {
+            0
+        };
+        let snapshot_index = snapshots.len();
+        snapshots.push(FileSnapshot {
+            relative_path: relative.clone(),
+            kind,
+            size,
+            mtime_ns,
+            hash: None,
+        });
+        if kind == EntryKind::File {
+            hash_tasks.push((snapshot_index, path, size.max(1)));
+        }
+    }
+    hash_files(&mut snapshots, &hash_tasks, &|_, _| {}, &|| false)?;
+    Ok(snapshots
+        .into_iter()
+        .map(|snapshot| (snapshot.relative_path.clone(), snapshot))
+        .collect())
+}
+
+fn hash_files<F, C>(
+    snapshots: &mut [FileSnapshot],
+    tasks: &[(usize, PathBuf, u64)],
+    progress: &F,
+    is_cancelled: &C,
+) -> Result<()>
+where
+    F: Fn(u64, u64) + Sync,
+    C: Fn() -> bool + Sync,
+{
+    if tasks.is_empty() {
+        return Ok(());
+    }
+    check_cancelled(is_cancelled)?;
+    let total = tasks.iter().map(|(_, _, work)| work).sum();
+    progress(0, total);
+
+    let available = thread::available_parallelism().map_or(1, usize::from);
+    let worker_count = available.min(MAX_HASH_WORKERS).min(tasks.len());
+    let next = AtomicUsize::new(0);
+    let completed = AtomicU64::new(0);
+    let stop = AtomicBool::new(false);
+    let (sender, receiver) = mpsc::channel();
+    let mut first_error = None;
+    let mut was_cancelled = false;
+
+    thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let sender = sender.clone();
+            let next = &next;
+            let completed = &completed;
+            let stop = &stop;
+            scope.spawn(move || loop {
+                if stop.load(Ordering::Relaxed) || is_cancelled() {
+                    break;
+                }
+                let task_index = next.fetch_add(1, Ordering::Relaxed);
+                let Some((snapshot_index, path, work)) = tasks.get(task_index) else {
+                    break;
+                };
+                let mut file_progress = 0_u64;
+                let result = hashing::sha256_with_progress(
+                    path,
+                    |delta| {
+                        file_progress += delta;
+                        let done = completed.fetch_add(delta, Ordering::Relaxed) + delta;
+                        progress(done.min(total), total);
+                    },
+                    || stop.load(Ordering::Relaxed) || is_cancelled(),
+                );
+                if result.is_ok() && file_progress < *work {
+                    let remaining = *work - file_progress;
+                    let done = completed.fetch_add(remaining, Ordering::Relaxed) + remaining;
+                    progress(done.min(total), total);
+                }
+                if result.is_err() {
+                    stop.store(true, Ordering::Relaxed);
+                }
+                if sender.send((*snapshot_index, result)).is_err() {
+                    break;
+                }
+            });
+        }
+        drop(sender);
+        for (snapshot_index, result) in receiver {
+            match result {
+                Ok(hash) => snapshots[snapshot_index].hash = Some(hash),
+                Err(BriefcaseError::Cancelled) => was_cancelled = true,
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+    });
+
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    if was_cancelled {
+        return Err(BriefcaseError::Cancelled);
+    }
+    check_cancelled(is_cancelled)
+}
+
+fn check_cancelled(is_cancelled: &dyn Fn() -> bool) -> Result<()> {
+    if is_cancelled() {
+        Err(BriefcaseError::Cancelled)
+    } else {
+        Ok(())
+    }
 }
 
 fn metadata_matches(
@@ -122,4 +292,60 @@ pub fn validate_relative(path: &Path) -> Result<()> {
         return Err(BriefcaseError::UnsafePath(path.to_path_buf()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn scan_reports_discovery_and_hash_progress() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("one.bin"), vec![1_u8; 1024]).unwrap();
+        fs::write(temp.path().join("two.bin"), vec![2_u8; 2048]).unwrap();
+        let events = std::sync::Mutex::new(Vec::new());
+
+        let snapshots = scan_with_progress_and_cancel(
+            temp.path(),
+            ScanSide::Source,
+            &BTreeMap::new(),
+            ScanMode::Verified,
+            |completed, total| events.lock().unwrap().push((completed, total)),
+            || false,
+        )
+        .unwrap();
+
+        assert_eq!(snapshots.len(), 2);
+        let events = events.into_inner().unwrap();
+        assert!(events
+            .iter()
+            .any(|(completed, total)| *completed > 0 && *total == 0));
+        assert!(events
+            .iter()
+            .any(|(completed, total)| *total > 0 && completed == total));
+    }
+
+    #[test]
+    fn scan_can_be_cancelled_while_discovering_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("one.bin"), b"one").unwrap();
+        fs::write(temp.path().join("two.bin"), b"two").unwrap();
+        let cancelled = AtomicBool::new(false);
+
+        let result = scan_with_progress_and_cancel(
+            temp.path(),
+            ScanSide::Source,
+            &BTreeMap::new(),
+            ScanMode::Verified,
+            |completed, total| {
+                if completed > 0 && total == 0 {
+                    cancelled.store(true, Ordering::Relaxed);
+                }
+            },
+            || cancelled.load(Ordering::Relaxed),
+        );
+
+        assert!(matches!(result, Err(BriefcaseError::Cancelled)));
+    }
 }

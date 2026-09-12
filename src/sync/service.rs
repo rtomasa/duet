@@ -69,18 +69,35 @@ impl BriefcaseService {
     }
 
     pub fn compare(&self, mode: ScanMode) -> Result<SyncPlan> {
+        self.compare_with_progress_and_cancel(mode, |_, _| {}, || false)
+    }
+
+    pub fn compare_with_progress_and_cancel<F, C>(
+        &self,
+        mode: ScanMode,
+        progress: F,
+        is_cancelled: C,
+    ) -> Result<SyncPlan>
+    where
+        F: Fn(u64, u64) + Sync,
+        C: Fn() -> bool + Sync,
+    {
         let baseline = self.database.entries()?;
-        let source = scanner::scan(
+        let source = scanner::scan_with_progress_and_cancel(
             &self.manifest.source.last_known_path,
             scanner::ScanSide::Source,
             &baseline,
             mode,
+            &progress,
+            &is_cancelled,
         )?;
-        let briefcase = scanner::scan(
+        let briefcase = scanner::scan_with_progress_and_cancel(
             &self.briefcase_root,
             scanner::ScanSide::Briefcase,
             &baseline,
             mode,
+            &progress,
+            &is_cancelled,
         )?;
         Ok(planner::build_plan(&baseline, source, briefcase))
     }
@@ -166,19 +183,12 @@ impl BriefcaseService {
     }
 
     fn refresh_baseline_for(&self, operations: &[PlannedOperation]) -> Result<()> {
-        let empty = BTreeMap::new();
-        let source = scanner::scan(
-            &self.manifest.source.last_known_path,
-            scanner::ScanSide::Source,
-            &empty,
-            ScanMode::Verified,
-        )?;
-        let briefcase = scanner::scan(
-            &self.briefcase_root,
-            scanner::ScanSide::Briefcase,
-            &empty,
-            ScanMode::Verified,
-        )?;
+        let paths: Vec<_> = operations
+            .iter()
+            .map(|operation| operation.relative_path.clone())
+            .collect();
+        let source = scanner::scan_paths_verified(&self.manifest.source.last_known_path, &paths)?;
+        let briefcase = scanner::scan_paths_verified(&self.briefcase_root, &paths)?;
         for operation in operations {
             let path = &operation.relative_path;
             match (source.get(path), briefcase.get(path)) {
@@ -323,21 +333,13 @@ mod tests {
                 &plan,
                 &BTreeMap::new(),
                 |operation, completed, total, finished| {
-                    events.push((
-                        operation.relative_path.clone(),
-                        completed,
-                        total,
-                        finished,
-                    ));
+                    events.push((operation.relative_path.clone(), completed, total, finished));
                 },
             )
             .unwrap();
 
         assert!(events.iter().any(|(path, completed, total, finished)| {
-            path == Path::new("progress.txt")
-                && !finished
-                && *completed == *total
-                && *total > 0
+            path == Path::new("progress.txt") && !finished && *completed == *total && *total > 0
         }));
         assert!(events
             .iter()
@@ -345,17 +347,12 @@ mod tests {
         let copied = events
             .iter()
             .position(|(path, completed, total, finished)| {
-                path == Path::new("progress.txt")
-                    && !finished
-                    && *completed == *total
-                    && *total > 0
+                path == Path::new("progress.txt") && !finished && *completed == *total && *total > 0
             })
             .unwrap();
         let finished = events
             .iter()
-            .position(|(path, _, _, finished)| {
-                path == Path::new("progress.txt") && *finished
-            })
+            .position(|(path, _, _, finished)| path == Path::new("progress.txt") && *finished)
             .unwrap();
         assert!(copied < finished);
     }
@@ -377,10 +374,7 @@ mod tests {
             &plan,
             &BTreeMap::new(),
             |operation, completed, _, finished| {
-                if operation.relative_path == Path::new("large.bin")
-                    && completed > 0
-                    && !finished
-                {
+                if operation.relative_path == Path::new("large.bin") && completed > 0 && !finished {
                     cancelled.set(true);
                 }
             },
@@ -541,5 +535,28 @@ mod tests {
                 Err(BriefcaseError::UnsupportedSymlink(_))
             ));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn synchronization_only_rechecks_paths_affected_by_the_plan() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let briefcase = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        write(&source.join("changed.txt"), "before");
+        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let initial = service.compare(ScanMode::Verified).unwrap();
+        service.synchronize(&initial, &BTreeMap::new()).unwrap();
+
+        write(&source.join("changed.txt"), "after");
+        let plan = service.compare(ScanMode::Verified).unwrap();
+        std::os::unix::fs::symlink("/tmp", source.join("appeared-after-check")).unwrap();
+
+        service.synchronize(&plan, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            fs::read_to_string(briefcase.join("changed.txt")).unwrap(),
+            "after"
+        );
     }
 }

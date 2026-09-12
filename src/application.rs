@@ -1,10 +1,10 @@
 use adw::prelude::*;
+use gettextrs::{gettext, ngettext};
 use gnome_briefcase::{
     BriefcaseError, BriefcaseService, ConflictResolution, EntryKind, PlannedOperation, ScanMode,
     SyncAction, SyncPlan,
 };
 use gtk::{gio, glib};
-use gettextrs::{gettext, ngettext};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -73,9 +73,7 @@ fn home_page(
     actions.set_halign(gtk::Align::Center);
     let create = gtk::Button::with_mnemonic(&gettext("_Create Briefcase"));
     create.add_css_class("suggested-action");
-    create.set_tooltip_text(Some(&gettext(
-        "Choose a source and a portable destination",
-    )));
+    create.set_tooltip_text(Some(&gettext("Choose a source and a portable destination")));
     let open = gtk::Button::with_mnemonic(&gettext("_Open Briefcase"));
     open.set_tooltip_text(Some(&gettext("Open an existing Briefcase folder")));
     actions.append(&create);
@@ -91,13 +89,7 @@ fn home_page(
         .build();
     content.append(&group);
     let known_rows = Rc::new(RefCell::new(Vec::new()));
-    populate_known_briefcases(
-        &group,
-        &known_rows,
-        window,
-        navigation,
-        toasts,
-    );
+    populate_known_briefcases(&group, &known_rows, window, navigation, toasts);
     let settings = settings();
     let settings_lifetime = settings.clone();
     let group_copy = group.clone();
@@ -352,6 +344,11 @@ fn open_briefcase(
     summary.set_xalign(0.0);
     summary.add_css_class("title-3");
     content.append(&summary);
+    let check_progress = gtk::ProgressBar::builder()
+        .show_text(true)
+        .visible(false)
+        .build();
+    content.append(&check_progress);
     let changes = gtk::ListBox::new();
     changes.add_css_class("boxed-list");
     changes.set_selection_mode(gtk::SelectionMode::None);
@@ -386,6 +383,7 @@ fn open_briefcase(
         toasts: toasts.clone(),
         state: state.clone(),
         summary: summary.clone(),
+        check_progress: check_progress.clone(),
         list: changes.clone(),
         compare_button: compare.clone(),
         sync_button: sync.clone(),
@@ -415,6 +413,7 @@ struct ViewComponents {
     toasts: adw::ToastOverlay,
     state: Rc<RefCell<UiState>>,
     summary: gtk::Label,
+    check_progress: gtk::ProgressBar,
     list: gtk::ListBox,
     compare_button: gtk::Button,
     sync_button: gtk::Button,
@@ -436,9 +435,18 @@ struct SyncProgressEvent {
     finished: bool,
 }
 
+struct ScanProgressEvent {
+    completed: u64,
+    total: u64,
+}
+
 fn run_compare(view: ViewComponents) {
     finish_sync_controls(&view);
     view.summary.set_text(&gettext("Checking folders…"));
+    view.check_progress.set_fraction(0.0);
+    view.check_progress.set_text(None);
+    view.check_progress.set_visible(true);
+    view.compare_button.set_sensitive(false);
     view.sync_button.set_sensitive(false);
     let Some(root) = view.state.borrow().briefcase_root.clone() else {
         return;
@@ -448,14 +456,38 @@ fn run_compare(view: ViewComponents) {
     } else {
         ScanMode::Fast
     };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    *view.cancellation.borrow_mut() = Some(cancellation.clone());
+    view.stop_button.set_label(&gettext("Stop"));
+    view.stop_button.set_sensitive(true);
+    view.stop_button.set_visible(true);
+    let (sender, receiver) = mpsc::channel::<ScanProgressEvent>();
+    let progress_view = view.clone();
+    let progress_source = glib::timeout_add_local(Duration::from_millis(50), move || {
+        while let Ok(event) = receiver.try_recv() {
+            update_scan_progress(&progress_view, event);
+        }
+        glib::ControlFlow::Continue
+    });
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let service = BriefcaseService::open(&root)?;
-            service.compare(mode)
+            service.compare_with_progress_and_cancel(
+                mode,
+                move |completed, total| {
+                    let _ = sender.send(ScanProgressEvent { completed, total });
+                },
+                move || cancellation.load(Ordering::Relaxed),
+            )
         })
         .await;
+        progress_source.remove();
+        finish_sync_controls(&view);
         match result {
             Ok(Ok(plan)) => render_plan(&view, plan),
+            Ok(Err(BriefcaseError::Cancelled)) => {
+                view.summary.set_text(&gettext("Ready to check"));
+            }
             Ok(Err(error)) => {
                 view.summary.set_text(&gettext("Check failed"));
                 show_error(&view.toasts, &localized_error(&error));
@@ -478,7 +510,7 @@ fn request_stop(view: &ViewComponents) {
     cancellation.store(true, Ordering::Relaxed);
     view.stop_button.set_sensitive(false);
     view.stop_button.set_label(&gettext("Stopping…"));
-    view.summary.set_text(&gettext("Stopping synchronization…"));
+    view.summary.set_text(&gettext("Stopping…"));
 }
 
 fn finish_sync_controls(view: &ViewComponents) {
@@ -487,6 +519,24 @@ fn finish_sync_controls(view: &ViewComponents) {
     view.stop_button.set_sensitive(true);
     view.stop_button.set_label(&gettext("Stop"));
     view.compare_button.set_sensitive(true);
+    view.check_progress.set_visible(false);
+    view.check_progress.set_fraction(0.0);
+    view.check_progress.set_text(None);
+}
+
+fn update_scan_progress(view: &ViewComponents, event: ScanProgressEvent) {
+    if event.total == 0 {
+        view.check_progress.set_fraction(0.0);
+        view.check_progress.pulse();
+        view.check_progress
+            .set_text(Some(&event.completed.to_string()));
+        return;
+    }
+    let fraction = (event.completed as f64 / event.total as f64).clamp(0.0, 1.0);
+    view.check_progress
+        .set_fraction(view.check_progress.fraction().max(fraction));
+    view.check_progress
+        .set_text(Some(&format!("{}%", (fraction * 100.0).round() as u32)));
 }
 
 fn render_plan(view: &ViewComponents, plan: SyncPlan) {
@@ -499,12 +549,8 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     let conflicts = plan.conflicts.len();
     let changes_label = ngettext("{count} change", "{count} changes", changes as u32)
         .replace("{count}", &changes.to_string());
-    let conflicts_label = ngettext(
-        "{count} conflict",
-        "{count} conflicts",
-        conflicts as u32,
-    )
-    .replace("{count}", &conflicts.to_string());
+    let conflicts_label = ngettext("{count} conflict", "{count} conflicts", conflicts as u32)
+        .replace("{count}", &conflicts.to_string());
     view.summary
         .set_text(&format!("{changes_label} · {conflicts_label}"));
     for op in plan
@@ -521,10 +567,9 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     for conflict in &plan.conflicts {
         let widgets = conflict_row(view, conflict);
         view.list.append(&widgets.row);
-        view.operation_rows.borrow_mut().insert(
-            conflict.operation.relative_path.clone(),
-            widgets,
-        );
+        view.operation_rows
+            .borrow_mut()
+            .insert(conflict.operation.relative_path.clone(), widgets);
     }
     if changes == 0 && conflicts == 0 {
         let row = adw::ActionRow::builder()
@@ -558,10 +603,7 @@ fn operation_row(op: &PlannedOperation) -> OperationWidgets {
     OperationWidgets { row, progress }
 }
 
-fn conflict_row(
-    view: &ViewComponents,
-    conflict: &gnome_briefcase::Conflict,
-) -> OperationWidgets {
+fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> OperationWidgets {
     let row = adw::ActionRow::builder()
         .title(conflict.operation.relative_path.to_string_lossy())
         .subtitle(&gettext("Both copies changed — skipped until you choose"))
@@ -723,11 +765,10 @@ async fn ask_deletion_action(
     } else {
         gettext("Briefcase")
     };
-    let message = gettext(
-        "{path} was deleted from {location}. Choose what to do with the remaining copy.",
-    )
-    .replace("{path}", &operation.relative_path.to_string_lossy())
-    .replace("{location}", &location);
+    let message =
+        gettext("{path} was deleted from {location}. Choose what to do with the remaining copy.")
+            .replace("{path}", &operation.relative_path.to_string_lossy())
+            .replace("{location}", &location);
     let dialog = adw::AlertDialog::new(Some(&gettext("File Deleted")), Some(&message));
     dialog.add_responses(&[
         ("skip", &gettext("Skip")),
@@ -737,9 +778,8 @@ async fn ask_deletion_action(
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("skip"));
     dialog.set_close_response("cancel");
-    let do_not_ask = gtk::CheckButton::with_label(&gettext(
-        "Do not ask again for remaining deletions",
-    ));
+    let do_not_ask =
+        gtk::CheckButton::with_label(&gettext("Do not ask again for remaining deletions"));
     dialog.set_extra_child(Some(&do_not_ask));
     let response = dialog.choose_future(window).await;
     let choice = match response.as_str() {
@@ -754,12 +794,8 @@ async fn ask_deletion_action(
 fn apply_deletion_choice(operation: &mut PlannedOperation, choice: DeletionChoice) {
     operation.action = match (choice, operation.action) {
         (DeletionChoice::Skip, _) => SyncAction::None,
-        (DeletionChoice::Restore, SyncAction::DeleteBriefcase) => {
-            SyncAction::BriefcaseToSource
-        }
-        (DeletionChoice::Restore, SyncAction::DeleteSource) => {
-            SyncAction::SourceToBriefcase
-        }
+        (DeletionChoice::Restore, SyncAction::DeleteBriefcase) => SyncAction::BriefcaseToSource,
+        (DeletionChoice::Restore, SyncAction::DeleteSource) => SyncAction::SourceToBriefcase,
         (DeletionChoice::Delete, action) | (DeletionChoice::Restore, action) => action,
     };
 }
@@ -854,13 +890,10 @@ fn update_operation_progress(view: &ViewComponents, event: SyncProgressEvent) {
         widgets.progress.set_text(Some(&gettext("Finalizing…")));
     } else {
         let fraction = event.completed as f64 / event.total as f64;
+        widgets.progress.set_fraction(fraction * 0.9);
         widgets
             .progress
-            .set_fraction(fraction * 0.9);
-        widgets.progress.set_text(Some(&format!(
-            "{}%",
-            (fraction * 90.0).round() as u32
-        )));
+            .set_text(Some(&format!("{}%", (fraction * 90.0).round() as u32)));
     }
 }
 
@@ -1140,10 +1173,10 @@ fn localized_error(error: &BriefcaseError) -> String {
             gettext("The folder is not a valid Briefcase: {path}")
                 .replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::DestinationNotEmpty(path) => gettext(
-            "The destination folder already exists and is not empty: {path}",
-        )
-        .replace("{path}", &path.to_string_lossy()),
+        BriefcaseError::DestinationNotEmpty(path) => {
+            gettext("The destination folder already exists and is not empty: {path}")
+                .replace("{path}", &path.to_string_lossy())
+        }
         BriefcaseError::OverlappingRoots => {
             gettext("The Source and Briefcase folders cannot contain one another")
         }
@@ -1160,16 +1193,17 @@ fn localized_error(error: &BriefcaseError) -> String {
         }
         BriefcaseError::Cancelled => gettext("Synchronization was stopped"),
         BriefcaseError::SourceUnavailable(path) => {
-            gettext("The Source is unavailable: {path}")
-                .replace("{path}", &path.to_string_lossy())
+            gettext("The Source is unavailable: {path}").replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::UnresolvedConflict(path) => gettext("Unresolved conflict: {path}")
-            .replace("{path}", &path.to_string_lossy()),
+        BriefcaseError::UnresolvedConflict(path) => {
+            gettext("Unresolved conflict: {path}").replace("{path}", &path.to_string_lossy())
+        }
         BriefcaseError::Database(source) => {
             gettext("Database error: {error}").replace("{error}", &source.to_string())
         }
-        BriefcaseError::Manifest(source) => gettext("Invalid Briefcase metadata: {error}")
-            .replace("{error}", &source.to_string()),
+        BriefcaseError::Manifest(source) => {
+            gettext("Invalid Briefcase metadata: {error}").replace("{error}", &source.to_string())
+        }
         BriefcaseError::Other(source) => source.to_string(),
     }
 }
