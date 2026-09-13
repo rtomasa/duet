@@ -325,13 +325,67 @@ fn open_duet(
         navigation.push(&page);
         return;
     }
-    let service = match DuetService::open(&root) {
-        Ok(service) => service,
-        Err(error) => {
-            show_error(toasts, &localized_error(&error));
+    let loading_page = opening_page(&root);
+    navigation.push(&loading_page);
+    let window = window.clone();
+    let navigation = navigation.clone();
+    let toasts = toasts.clone();
+    let active_operations = active_operations.clone();
+    glib::spawn_future_local(async move {
+        let root_for_task = root.clone();
+        let result = gio::spawn_blocking(move || DuetService::open(&root_for_task)).await;
+        if navigation.visible_page().as_ref() != Some(&loading_page) {
             return;
         }
-    };
+        navigation.pop();
+        match result {
+            Ok(Ok(service)) => show_duet(
+                &window,
+                &navigation,
+                &toasts,
+                &active_operations,
+                root,
+                service,
+            ),
+            Ok(Err(error)) => show_error(&toasts, &localized_error(&error)),
+            Err(_) => show_error(
+                &toasts,
+                &english("The background operation stopped unexpectedly"),
+            ),
+        }
+    });
+}
+
+fn opening_page(root: &Path) -> adw::NavigationPage {
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header_bar());
+    let status = adw::StatusPage::builder()
+        .icon_name("folder-symbolic")
+        .title(&english("Opening Target…"))
+        .description(&english("Loading synchronization information"))
+        .build();
+    let spinner = gtk::Spinner::new();
+    spinner.start();
+    status.set_child(Some(&spinner));
+    toolbar.set_content(Some(&status));
+    adw::NavigationPage::builder()
+        .title(
+            root.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Target"),
+        )
+        .child(&toolbar)
+        .build()
+}
+
+fn show_duet(
+    window: &adw::ApplicationWindow,
+    navigation: &adw::NavigationView,
+    toasts: &adw::ToastOverlay,
+    active_operations: &ActiveOperations,
+    root: PathBuf,
+    service: DuetService,
+) {
     remember(&root);
     let state = Rc::new(RefCell::new(UiState {
         duet_root: Some(root),
