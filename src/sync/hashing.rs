@@ -1,4 +1,4 @@
-use crate::{BriefcaseError, Result};
+use crate::{DuetError, Result};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -9,17 +9,17 @@ where
     F: FnMut(u64),
     C: Fn() -> bool,
 {
-    let file = File::open(path).map_err(|e| BriefcaseError::io(path, e))?;
+    let file = File::open(path).map_err(|e| DuetError::io(path, e))?;
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
         if is_cancelled() {
-            return Err(BriefcaseError::Cancelled);
+            return Err(DuetError::Cancelled);
         }
         let count = reader
             .read(&mut buffer)
-            .map_err(|e| BriefcaseError::io(path, e))?;
+            .map_err(|e| DuetError::io(path, e))?;
         if count == 0 {
             break;
         }
@@ -47,6 +47,6 @@ mod tests {
             || cancelled.load(Ordering::Relaxed),
         );
 
-        assert!(matches!(result, Err(BriefcaseError::Cancelled)));
+        assert!(matches!(result, Err(DuetError::Cancelled)));
     }
 }

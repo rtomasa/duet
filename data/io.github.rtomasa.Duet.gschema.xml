@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="io.github.rtomasa.Briefcase" path="/io/github/rtomasa/Briefcase/">
-    <key name="known-briefcases" type="as">
+  <schema id="io.github.rtomasa.Duet" path="/io/github/rtomasa/Duet/">
+    <key name="known-duets" type="as">
       <default>[]</default>
-      <summary>Known Briefcase folders</summary>
+      <summary>Known Duet folders</summary>
     </key>
     <key name="deletion-action" type="s">
       <choices>

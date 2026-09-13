@@ -5,4 +5,4 @@ mod scanner;
 mod service;
 
 pub use scanner::ScanMode;
-pub use service::{BriefcaseService, SyncOutcome};
+pub use service::{DuetService, SyncOutcome};

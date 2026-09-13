@@ -1,10 +1,10 @@
 [package]
-name = "gnome-briefcase"
+name = "duet"
 version = "0.1.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Explicit, local, bidirectional folder synchronization for GNOME"
-repository = "https://github.com/rtomasa/gnome-briefcase"
+repository = "https://github.com/rtomasa/duet"
 
 [features]
 default = []
@@ -34,7 +34,7 @@ gio = { version = "0.20", optional = true }
 tempfile = "3.12"
 
 [[bin]]
-name = "gnome-briefcase"
+name = "duet"
 path = "src/main.rs"
 
 [profile.release]

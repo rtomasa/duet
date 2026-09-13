@@ -1,6 +1,6 @@
 use super::{executor, planner, scanner};
 use crate::{
-    BaselineEntry, BriefcaseError, BriefcaseManifest, ConflictResolution, Database, FileSnapshot,
+    BaselineEntry, ConflictResolution, Database, DuetError, DuetManifest, FileSnapshot,
     ManifestRepository, PlannedOperation, Result, SyncAction, SyncPlan,
 };
 use std::collections::BTreeMap;
@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 
 pub use super::scanner::ScanMode;
 
-pub struct BriefcaseService {
-    pub briefcase_root: PathBuf,
-    pub manifest: BriefcaseManifest,
+pub struct DuetService {
+    pub duet_root: PathBuf,
+    pub manifest: DuetManifest,
     database: Database,
 }
 
@@ -22,49 +22,45 @@ pub struct SyncOutcome {
     pub recovered_incomplete_transaction: bool,
 }
 
-impl BriefcaseService {
-    pub fn create(source_root: &Path, briefcase_root: &Path, name: &str) -> Result<Self> {
-        ensure_non_overlapping(source_root, briefcase_root)?;
+impl DuetService {
+    pub fn create(source_root: &Path, duet_root: &Path, name: &str) -> Result<Self> {
+        ensure_non_overlapping(source_root, duet_root)?;
         if !source_root.is_dir() {
-            return Err(BriefcaseError::SourceUnavailable(source_root.to_path_buf()));
+            return Err(DuetError::SourceUnavailable(source_root.to_path_buf()));
         }
-        if briefcase_root.exists() {
-            let mut entries =
-                fs::read_dir(briefcase_root).map_err(|e| BriefcaseError::io(briefcase_root, e))?;
+        if duet_root.exists() {
+            let mut entries = fs::read_dir(duet_root).map_err(|e| DuetError::io(duet_root, e))?;
             if entries.next().is_some() {
-                return Err(BriefcaseError::DestinationNotEmpty(
-                    briefcase_root.to_path_buf(),
-                ));
+                return Err(DuetError::DestinationNotEmpty(duet_root.to_path_buf()));
             }
         }
-        fs::create_dir_all(briefcase_root).map_err(|e| BriefcaseError::io(briefcase_root, e))?;
-        let manifest = ManifestRepository::create(briefcase_root, source_root, name)?;
-        let database = Database::open(briefcase_root)?;
+        fs::create_dir_all(duet_root).map_err(|e| DuetError::io(duet_root, e))?;
+        let manifest = ManifestRepository::create(duet_root, source_root, name)?;
+        let database = Database::open(duet_root)?;
         Ok(Self {
-            briefcase_root: briefcase_root.to_path_buf(),
+            duet_root: duet_root.to_path_buf(),
             manifest,
             database,
         })
     }
 
-    pub fn open(briefcase_root: &Path) -> Result<Self> {
-        let manifest = ManifestRepository::load(briefcase_root)?;
-        let database = Database::open(briefcase_root)?;
-        ensure_non_overlapping(&manifest.source.last_known_path, briefcase_root)?;
+    pub fn open(duet_root: &Path) -> Result<Self> {
+        let manifest = ManifestRepository::load(duet_root)?;
+        let database = Database::open(duet_root)?;
+        ensure_non_overlapping(&manifest.source.last_known_path, duet_root)?;
         Ok(Self {
-            briefcase_root: briefcase_root.to_path_buf(),
+            duet_root: duet_root.to_path_buf(),
             manifest,
             database,
         })
     }
 
     pub fn rebind_source(&mut self, source_root: &Path) -> Result<()> {
-        ensure_non_overlapping(source_root, &self.briefcase_root)?;
+        ensure_non_overlapping(source_root, &self.duet_root)?;
         if !source_root.is_dir() {
-            return Err(BriefcaseError::SourceUnavailable(source_root.to_path_buf()));
+            return Err(DuetError::SourceUnavailable(source_root.to_path_buf()));
         }
-        self.manifest =
-            ManifestRepository::rebind_source(&self.briefcase_root, source_root.into())?;
+        self.manifest = ManifestRepository::rebind_source(&self.duet_root, source_root.into())?;
         Ok(())
     }
 
@@ -91,15 +87,15 @@ impl BriefcaseService {
             &progress,
             &is_cancelled,
         )?;
-        let briefcase = scanner::scan_with_progress_and_cancel(
-            &self.briefcase_root,
-            scanner::ScanSide::Briefcase,
+        let duet = scanner::scan_with_progress_and_cancel(
+            &self.duet_root,
+            scanner::ScanSide::Duet,
             &baseline,
             mode,
             &progress,
             &is_cancelled,
         )?;
-        Ok(planner::build_plan(&baseline, source, briefcase))
+        Ok(planner::build_plan(&baseline, source, duet))
     }
 
     pub fn synchronize(
@@ -134,7 +130,7 @@ impl BriefcaseService {
         C: Fn() -> bool,
     {
         let recovered = self.database.has_incomplete_transaction()?;
-        let _lock = executor::MutationLock::acquire(&self.briefcase_root)?;
+        let _lock = executor::MutationLock::acquire(&self.duet_root)?;
         let mut operations: Vec<_> = plan
             .operations
             .iter()
@@ -168,7 +164,7 @@ impl BriefcaseService {
             };
             let copied = match executor::apply_one_with_progress(
                 &self.manifest.source.last_known_path,
-                &self.briefcase_root,
+                &self.duet_root,
                 operation,
                 expected,
                 &mut |completed, total| progress(operation, completed, total, false),
@@ -198,7 +194,7 @@ impl BriefcaseService {
             progress(operation, 1, 1, true);
         }
         if is_cancelled() {
-            let error = BriefcaseError::Cancelled;
+            let error = DuetError::Cancelled;
             let _ = self
                 .database
                 .fail_transaction(&transaction, &error.to_string());
@@ -226,12 +222,12 @@ fn checked_origin_snapshot<'a>(
     operation: &PlannedOperation,
 ) -> Result<Option<&'a FileSnapshot>> {
     let snapshot = match operation.action {
-        SyncAction::SourceToBriefcase => plan.source_snapshots.get(&operation.relative_path),
-        SyncAction::BriefcaseToSource => plan.briefcase_snapshots.get(&operation.relative_path),
+        SyncAction::SourceToDuet => plan.source_snapshots.get(&operation.relative_path),
+        SyncAction::DuetToSource => plan.duet_snapshots.get(&operation.relative_path),
         _ => return Ok(None),
     };
     snapshot.map(Some).ok_or_else(|| {
-        BriefcaseError::Other(anyhow::anyhow!(
+        DuetError::Other(anyhow::anyhow!(
             "The checked copy of {} is no longer available",
             operation.relative_path.display()
         ))
@@ -245,15 +241,15 @@ fn baseline_change(
 ) -> Result<Option<BaselineEntry>> {
     let path = &operation.relative_path;
     let entry = match operation.action {
-        SyncAction::SourceToBriefcase | SyncAction::BriefcaseToSource => {
+        SyncAction::SourceToDuet | SyncAction::DuetToSource => {
             let copied = copied.ok_or_else(|| {
-                BriefcaseError::Other(anyhow::anyhow!(
+                DuetError::Other(anyhow::anyhow!(
                     "No copy metadata was recorded for {}",
                     path.display()
                 ))
             })?;
-            let (source_size, source_mtime_ns, briefcase_size, briefcase_mtime_ns) =
-                if operation.action == SyncAction::SourceToBriefcase {
+            let (source_size, source_mtime_ns, duet_size, duet_mtime_ns) =
+                if operation.action == SyncAction::SourceToDuet {
                     (
                         copied.from_size,
                         copied.from_mtime_ns,
@@ -274,21 +270,21 @@ fn baseline_change(
                 baseline_hash: copied.hash,
                 source_size: Some(source_size),
                 source_mtime_ns: Some(source_mtime_ns),
-                briefcase_size: Some(briefcase_size),
-                briefcase_mtime_ns: Some(briefcase_mtime_ns),
+                duet_size: Some(duet_size),
+                duet_mtime_ns: Some(duet_mtime_ns),
             }
         }
         SyncAction::Adopt => {
             let source = plan.source_snapshots.get(path);
-            let briefcase = plan.briefcase_snapshots.get(path);
-            let (Some(source), Some(briefcase)) = (source, briefcase) else {
-                return Err(BriefcaseError::Other(anyhow::anyhow!(
+            let duet = plan.duet_snapshots.get(path);
+            let (Some(source), Some(duet)) = (source, duet) else {
+                return Err(DuetError::Other(anyhow::anyhow!(
                     "The copies of {} are no longer available",
                     path.display()
                 )));
             };
-            if source.kind != briefcase.kind || source.hash != briefcase.hash {
-                return Err(BriefcaseError::Other(anyhow::anyhow!(
+            if source.kind != duet.kind || source.hash != duet.hash {
+                return Err(DuetError::Other(anyhow::anyhow!(
                     "The checked copies of {} are not equivalent",
                     path.display()
                 )));
@@ -299,16 +295,16 @@ fn baseline_change(
                 baseline_hash: source.hash.clone(),
                 source_size: Some(source.size),
                 source_mtime_ns: Some(source.mtime_ns),
-                briefcase_size: Some(briefcase.size),
-                briefcase_mtime_ns: Some(briefcase.mtime_ns),
+                duet_size: Some(duet.size),
+                duet_mtime_ns: Some(duet.mtime_ns),
             }
         }
-        SyncAction::DeleteSource | SyncAction::DeleteBriefcase | SyncAction::RemoveBaseline => {
+        SyncAction::DeleteSource | SyncAction::DeleteDuet | SyncAction::RemoveBaseline => {
             return Ok(None)
         }
         SyncAction::None => return Ok(None),
         SyncAction::Conflict => {
-            return Err(BriefcaseError::UnresolvedConflict(path.clone()));
+            return Err(DuetError::UnresolvedConflict(path.clone()));
         }
     };
     Ok(Some(entry))
@@ -325,27 +321,27 @@ fn resolve_conflict(
             result.kind = conflict
                 .source
                 .as_ref()
-                .ok_or_else(|| BriefcaseError::UnresolvedConflict(operation.relative_path.clone()))?
+                .ok_or_else(|| DuetError::UnresolvedConflict(operation.relative_path.clone()))?
                 .kind;
-            SyncAction::SourceToBriefcase
+            SyncAction::SourceToDuet
         }
-        ConflictResolution::KeepBriefcase => {
+        ConflictResolution::KeepDuet => {
             result.kind = conflict
-                .briefcase
+                .duet
                 .as_ref()
-                .ok_or_else(|| BriefcaseError::UnresolvedConflict(operation.relative_path.clone()))?
+                .ok_or_else(|| DuetError::UnresolvedConflict(operation.relative_path.clone()))?
                 .kind;
-            SyncAction::BriefcaseToSource
+            SyncAction::DuetToSource
         }
         ConflictResolution::AcceptDeletion => {
-            match (operation.source_state, operation.briefcase_state) {
+            match (operation.source_state, operation.duet_state) {
                 (crate::ChangeState::Deleted, _) => {
                     result.kind = conflict
-                        .briefcase
+                        .duet
                         .as_ref()
                         .map(|s| s.kind)
                         .unwrap_or(result.kind);
-                    SyncAction::DeleteBriefcase
+                    SyncAction::DeleteDuet
                 }
                 (_, crate::ChangeState::Deleted) => {
                     result.kind = conflict
@@ -356,7 +352,7 @@ fn resolve_conflict(
                     SyncAction::DeleteSource
                 }
                 _ => {
-                    return Err(BriefcaseError::Other(anyhow::anyhow!(
+                    return Err(DuetError::Other(anyhow::anyhow!(
                         "There is no deletion to accept for {}",
                         operation.relative_path.display()
                     )))
@@ -364,7 +360,7 @@ fn resolve_conflict(
             }
         }
         ConflictResolution::Skip => {
-            return Err(BriefcaseError::UnresolvedConflict(
+            return Err(DuetError::UnresolvedConflict(
                 operation.relative_path.clone(),
             ))
         }
@@ -372,15 +368,13 @@ fn resolve_conflict(
     Ok(result)
 }
 
-fn ensure_non_overlapping(source: &Path, briefcase: &Path) -> Result<()> {
+fn ensure_non_overlapping(source: &Path, duet: &Path) -> Result<()> {
     let source = source
         .canonicalize()
         .unwrap_or_else(|_| source.to_path_buf());
-    let briefcase = briefcase
-        .canonicalize()
-        .unwrap_or_else(|_| briefcase.to_path_buf());
-    if source == briefcase || source.starts_with(&briefcase) || briefcase.starts_with(&source) {
-        return Err(BriefcaseError::OverlappingRoots);
+    let duet = duet.canonicalize().unwrap_or_else(|_| duet.to_path_buf());
+    if source == duet || source.starts_with(&duet) || duet.starts_with(&source) {
+        return Err(DuetError::OverlappingRoots);
     }
     Ok(())
 }
@@ -400,29 +394,29 @@ mod tests {
     fn initial_sync_copies_nested_files_and_empty_directories() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(source.join("empty")).unwrap();
         write(&source.join("docs/note.txt"), "hello");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let plan = service.compare(ScanMode::Verified).unwrap();
         assert_eq!(plan.conflicts.len(), 0);
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(
-            fs::read_to_string(briefcase.join("docs/note.txt")).unwrap(),
+            fs::read_to_string(duet.join("docs/note.txt")).unwrap(),
             "hello"
         );
-        assert!(briefcase.join("empty").is_dir());
-        assert!(!source.join(".briefcase").exists());
+        assert!(duet.join("empty").is_dir());
+        assert!(!source.join(".duet").exists());
     }
 
     #[test]
     fn synchronization_reports_byte_progress_and_completion() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         write(&source.join("progress.txt"), "progress");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let plan = service.compare(ScanMode::Verified).unwrap();
         let mut events = Vec::new();
 
@@ -461,10 +455,10 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("large.bin"), vec![7_u8; 3 * 1024 * 1024]).unwrap();
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let plan = service.compare(ScanMode::Verified).unwrap();
         let cancelled = Cell::new(false);
 
@@ -479,20 +473,20 @@ mod tests {
             || cancelled.get(),
         );
 
-        assert!(matches!(result, Err(BriefcaseError::Cancelled)));
-        assert!(!briefcase.join("large.bin").exists());
+        assert!(matches!(result, Err(DuetError::Cancelled)));
+        assert!(!duet.join("large.bin").exists());
     }
 
     #[test]
     fn synchronization_rejects_content_changed_after_check_even_with_same_metadata() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         let path = source.join("changed.bin");
         fs::write(&path, b"original").unwrap();
         let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let plan = service.compare(ScanMode::Verified).unwrap();
 
         // Keep both size and modification time unchanged so the streaming hash,
@@ -504,17 +498,17 @@ mod tests {
         let result = service.synchronize(&plan, &BTreeMap::new());
 
         assert!(result.is_err());
-        assert!(!briefcase.join("changed.bin").exists());
+        assert!(!duet.join("changed.bin").exists());
     }
 
     #[test]
     fn empty_file_copy_reports_determinate_completion() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("empty.bin"), []).unwrap();
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let plan = service.compare(ScanMode::Verified).unwrap();
         let mut events = Vec::new();
 
@@ -540,20 +534,20 @@ mod tests {
     fn changes_flow_in_both_directions_and_conflicts_are_not_silent() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         write(&source.join("a.txt"), "base");
         write(&source.join("b.txt"), "base");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let plan = service.compare(ScanMode::Verified).unwrap();
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
 
         write(&source.join("a.txt"), "source edit");
-        write(&briefcase.join("b.txt"), "portable edit");
+        write(&duet.join("b.txt"), "portable edit");
         let plan = service.compare(ScanMode::Verified).unwrap();
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(
-            fs::read_to_string(briefcase.join("a.txt")).unwrap(),
+            fs::read_to_string(duet.join("a.txt")).unwrap(),
             "source edit"
         );
         assert_eq!(
@@ -562,47 +556,44 @@ mod tests {
         );
 
         write(&source.join("a.txt"), "left");
-        write(&briefcase.join("a.txt"), "right");
+        write(&duet.join("a.txt"), "right");
         let plan = service.compare(ScanMode::Verified).unwrap();
         assert_eq!(plan.conflicts.len(), 1);
         let outcome = service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(outcome.skipped_conflicts, 1);
         assert_eq!(fs::read_to_string(source.join("a.txt")).unwrap(), "left");
-        assert_eq!(
-            fs::read_to_string(briefcase.join("a.txt")).unwrap(),
-            "right"
-        );
+        assert_eq!(fs::read_to_string(duet.join("a.txt")).unwrap(), "right");
     }
 
     #[test]
     fn deletion_is_synchronized() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         write(&source.join("remove.txt"), "data");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let first = service.compare(ScanMode::Verified).unwrap();
         service.synchronize(&first, &BTreeMap::new()).unwrap();
         fs::remove_file(source.join("remove.txt")).unwrap();
         let second = service.compare(ScanMode::Verified).unwrap();
         assert!(second.has_deletions());
         service.synchronize(&second, &BTreeMap::new()).unwrap();
-        assert!(!briefcase.join("remove.txt").exists());
+        assert!(!duet.join("remove.txt").exists());
     }
 
     #[test]
     fn explicit_resolution_replaces_both_sides_and_sets_a_new_baseline() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         write(&source.join("conflict.txt"), "base");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let first = service.compare(ScanMode::Verified).unwrap();
         service.synchronize(&first, &BTreeMap::new()).unwrap();
         write(&source.join("conflict.txt"), "source wins");
-        write(&briefcase.join("conflict.txt"), "portable loses");
+        write(&duet.join("conflict.txt"), "portable loses");
 
         let plan = service.compare(ScanMode::Verified).unwrap();
         let mut resolutions = BTreeMap::new();
@@ -612,7 +603,7 @@ mod tests {
         );
         service.synchronize(&plan, &resolutions).unwrap();
         assert_eq!(
-            fs::read_to_string(briefcase.join("conflict.txt")).unwrap(),
+            fs::read_to_string(duet.join("conflict.txt")).unwrap(),
             "source wins"
         );
         let settled = service.compare(ScanMode::Verified).unwrap();
@@ -624,14 +615,14 @@ mod tests {
     fn deletion_conflict_can_accept_the_deletion() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         write(&source.join("choice.txt"), "base");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let first = service.compare(ScanMode::Verified).unwrap();
         service.synchronize(&first, &BTreeMap::new()).unwrap();
         fs::remove_file(source.join("choice.txt")).unwrap();
-        write(&briefcase.join("choice.txt"), "edited while away");
+        write(&duet.join("choice.txt"), "edited while away");
 
         let plan = service.compare(ScanMode::Verified).unwrap();
         assert_eq!(plan.conflicts.len(), 1);
@@ -641,7 +632,7 @@ mod tests {
             ConflictResolution::AcceptDeletion,
         );
         service.synchronize(&plan, &resolutions).unwrap();
-        assert!(!briefcase.join("choice.txt").exists());
+        assert!(!duet.join("choice.txt").exists());
         assert!(service
             .compare(ScanMode::Verified)
             .unwrap()
@@ -653,16 +644,16 @@ mod tests {
     fn refuses_to_initialize_over_existing_content() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
-        fs::create_dir_all(&briefcase).unwrap();
-        write(&briefcase.join("important.txt"), "do not overwrite");
+        fs::create_dir_all(&duet).unwrap();
+        write(&duet.join("important.txt"), "do not overwrite");
         assert!(matches!(
-            BriefcaseService::create(&source, &briefcase, "Bad"),
-            Err(BriefcaseError::DestinationNotEmpty(_))
+            DuetService::create(&source, &duet, "Bad"),
+            Err(DuetError::DestinationNotEmpty(_))
         ));
         assert_eq!(
-            fs::read_to_string(briefcase.join("important.txt")).unwrap(),
+            fs::read_to_string(duet.join("important.txt")).unwrap(),
             "do not overwrite"
         );
     }
@@ -673,17 +664,17 @@ mod tests {
         let source = temp.path().join("source");
         fs::create_dir_all(&source).unwrap();
         assert!(matches!(
-            BriefcaseService::create(&source, &source.join("portable"), "Bad"),
-            Err(BriefcaseError::OverlappingRoots)
+            DuetService::create(&source, &source.join("portable"), "Bad"),
+            Err(DuetError::OverlappingRoots)
         ));
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("/tmp", source.join("escape")).unwrap();
-            let briefcase = temp.path().join("portable");
-            let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+            let duet = temp.path().join("portable");
+            let service = DuetService::create(&source, &duet, "Test").unwrap();
             assert!(matches!(
                 service.compare(ScanMode::Verified),
-                Err(BriefcaseError::UnsupportedSymlink(_))
+                Err(DuetError::UnsupportedSymlink(_))
             ));
         }
     }
@@ -693,10 +684,10 @@ mod tests {
     fn synchronization_only_rechecks_paths_affected_by_the_plan() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
-        let briefcase = temp.path().join("portable");
+        let duet = temp.path().join("portable");
         fs::create_dir_all(&source).unwrap();
         write(&source.join("changed.txt"), "before");
-        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
         let initial = service.compare(ScanMode::Verified).unwrap();
         service.synchronize(&initial, &BTreeMap::new()).unwrap();
 
@@ -706,7 +697,7 @@ mod tests {
 
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(
-            fs::read_to_string(briefcase.join("changed.txt")).unwrap(),
+            fs::read_to_string(duet.join("changed.txt")).unwrap(),
             "after"
         );
     }

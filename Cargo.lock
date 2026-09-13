@@ -155,6 +155,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "duet"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "filetime",
+ "fs2",
+ "gio",
+ "glib",
+ "gtk4",
+ "hex",
+ "libadwaita",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -436,29 +459,6 @@ checksum = "8ab79e1ed126803a8fb827e3de0e2ff95191912b8db65cee467edb56fc4cc215"
 dependencies = [
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "gnome-briefcase"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "chrono",
- "filetime",
- "fs2",
- "gio",
- "glib",
- "gtk4",
- "hex",
- "libadwaita",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "uuid",
- "walkdir",
 ]
 
 [[package]]

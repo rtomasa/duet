@@ -1,7 +1,7 @@
 use adw::prelude::*;
-use gnome_briefcase::{
-    BriefcaseError, BriefcaseService, ConflictResolution, EntryKind, PlannedOperation, ScanMode,
-    SyncAction, SyncPlan,
+use duet::{
+    ConflictResolution, DuetError, DuetService, EntryKind, PlannedOperation, ScanMode, SyncAction,
+    SyncPlan,
 };
 use gtk::{gio, glib};
 use std::cell::RefCell;
@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const APP_ID: &str = "io.github.rtomasa.Briefcase";
+const APP_ID: &str = "io.github.rtomasa.Duet";
+const APP_NAME: &str = "Duet";
 
 fn english(message: &str) -> String {
     message.to_owned()
@@ -28,7 +29,7 @@ fn english_plural(singular: &str, plural: &str, count: u32) -> String {
 
 #[derive(Default)]
 struct UiState {
-    briefcase_root: Option<PathBuf>,
+    duet_root: Option<PathBuf>,
     source_root: Option<PathBuf>,
     plan: Option<SyncPlan>,
     resolutions: BTreeMap<PathBuf, ConflictResolution>,
@@ -44,7 +45,7 @@ pub fn run() -> glib::ExitCode {
 fn build_window(app: &adw::Application) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title(&english("Briefcase"))
+        .title(&english(APP_NAME))
         .default_width(720)
         .default_height(620)
         .build();
@@ -70,33 +71,33 @@ fn home_page(
     content.set_margin_end(24);
 
     let status = adw::StatusPage::builder()
-        .icon_name("io.github.rtomasa.Briefcase")
-        .title(&english("Briefcase"))
+        .icon_name(APP_ID)
+        .title(&english(APP_NAME))
         .description(&english(
             "Keep two folders synchronized explicitly and locally",
         ))
         .build();
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     actions.set_halign(gtk::Align::Center);
-    let create = gtk::Button::with_mnemonic(&english("_Create Briefcase"));
+    let create = gtk::Button::with_mnemonic(&english("_Create Duet"));
     create.add_css_class("suggested-action");
     create.set_tooltip_text(Some(&english("Choose a source and a portable destination")));
-    let open = gtk::Button::with_mnemonic(&english("_Open Briefcase"));
-    open.set_tooltip_text(Some(&english("Open an existing Briefcase folder")));
+    let open = gtk::Button::with_mnemonic(&english("_Open Duet"));
+    open.set_tooltip_text(Some(&english("Open an existing Duet folder")));
     actions.append(&create);
     actions.append(&open);
     status.set_child(Some(&actions));
     content.append(&status);
 
     let group = adw::PreferencesGroup::builder()
-        .title(&english("Your Briefcases"))
+        .title(&english("Your Duets"))
         .description(&english(
-            "Briefcases stay listed even when a removable drive is disconnected",
+            "Duets stay listed even when a removable drive is disconnected",
         ))
         .build();
     content.append(&group);
     let known_rows = Rc::new(RefCell::new(Vec::new()));
-    populate_known_briefcases(&group, &known_rows, window, navigation, toasts);
+    populate_known_duets(&group, &known_rows, window, navigation, toasts);
     let settings = settings();
     let settings_lifetime = settings.clone();
     let group_copy = group.clone();
@@ -104,9 +105,9 @@ fn home_page(
     let win = window.clone();
     let nav = navigation.clone();
     let overlay = toasts.clone();
-    settings.connect_changed(Some("known-briefcases"), move |_, _| {
+    settings.connect_changed(Some("known-duets"), move |_, _| {
         let _keep_alive = &settings_lifetime;
-        populate_known_briefcases(&group_copy, &rows_copy, &win, &nav, &overlay);
+        populate_known_duets(&group_copy, &rows_copy, &win, &nav, &overlay);
     });
 
     let nav = navigation.clone();
@@ -120,12 +121,12 @@ fn home_page(
 
     toolbar.set_content(Some(&content));
     adw::NavigationPage::builder()
-        .title(&english("Briefcase"))
+        .title(&english(APP_NAME))
         .child(&toolbar)
         .build()
 }
 
-fn populate_known_briefcases(
+fn populate_known_duets(
     group: &adw::PreferencesGroup,
     rows: &Rc<RefCell<Vec<adw::ActionRow>>>,
     window: &adw::ApplicationWindow,
@@ -136,12 +137,10 @@ fn populate_known_briefcases(
         group.remove(&row);
     }
 
-    for item in settings().strv("known-briefcases") {
+    for item in settings().strv("known-duets") {
         let root = PathBuf::from(item.as_str());
         let available = root.is_dir();
-        let service = available
-            .then(|| BriefcaseService::open(&root).ok())
-            .flatten();
+        let service = available.then(|| DuetService::open(&root).ok()).flatten();
         let name = service
             .as_ref()
             .map(|service| service.manifest.name.clone())
@@ -150,7 +149,7 @@ fn populate_known_briefcases(
                     .and_then(|name| name.to_str())
                     .map(ToOwned::to_owned)
             })
-            .unwrap_or_else(|| english("Briefcase"));
+            .unwrap_or_else(|| english("Duet"));
         let subtitle = if available {
             root.to_string_lossy().to_string()
         } else {
@@ -187,7 +186,7 @@ fn populate_known_briefcases(
         let overlay = toasts.clone();
         row.connect_activated(move |_| {
             if root.is_dir() {
-                open_briefcase(&win, &nav, &overlay, root.clone());
+                open_duet(&win, &nav, &overlay, root.clone());
             } else {
                 confirm_remove_unavailable(&win, root.clone());
             }
@@ -202,7 +201,7 @@ fn confirm_remove_unavailable(window: &adw::ApplicationWindow, root: PathBuf) {
         "The folder {path} is not available. It may be on a disconnected drive. Do you want to remove it from the list?",
     )
     .replace("{path}", &root.to_string_lossy());
-    let dialog = adw::AlertDialog::new(Some(&english("Briefcase unavailable")), Some(&message));
+    let dialog = adw::AlertDialog::new(Some(&english("Duet unavailable")), Some(&message));
     dialog.add_responses(&[
         ("keep", &english("Keep")),
         ("remove", &english("Remove from List")),
@@ -223,7 +222,7 @@ fn choose_existing(
     toasts: &adw::ToastOverlay,
 ) {
     let dialog = gtk::FileDialog::builder()
-        .title(&english("Open Briefcase"))
+        .title(&english("Open Duet"))
         .modal(true)
         .build();
     let window = window.clone();
@@ -232,7 +231,7 @@ fn choose_existing(
     glib::spawn_future_local(async move {
         if let Ok(folder) = dialog.select_folder_future(Some(&window)).await {
             if let Some(path) = folder.path() {
-                open_briefcase(&window, &navigation, &toasts, path);
+                open_duet(&window, &navigation, &toasts, path);
             }
         }
     });
@@ -256,7 +255,7 @@ fn choose_source(
         };
         let Some(source) = folder.path() else { return };
         let destination_dialog = gtk::FileDialog::builder()
-            .title(&english("Choose Briefcase Destination"))
+            .title(&english("Choose Duet Destination"))
             .modal(true)
             .build();
         let Ok(destination) = destination_dialog.select_folder_future(Some(&window)).await else {
@@ -268,18 +267,18 @@ fn choose_source(
         let name = source
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("Briefcase")
+            .unwrap_or("Duet")
             .to_string();
         let root = destination_parent.join(&name);
         let source_for_task = source.clone();
         let root_for_task = root.clone();
         let name_for_task = name.clone();
         let result = gio::spawn_blocking(move || {
-            BriefcaseService::create(&source_for_task, &root_for_task, &name_for_task)
+            DuetService::create(&source_for_task, &root_for_task, &name_for_task)
         })
         .await;
         match result {
-            Ok(Ok(_)) => open_briefcase(&window, &navigation, &toasts, root),
+            Ok(Ok(_)) => open_duet(&window, &navigation, &toasts, root),
             Ok(Err(error)) => show_error(&toasts, &localized_error(&error)),
             Err(_) => show_error(
                 &toasts,
@@ -289,13 +288,13 @@ fn choose_source(
     });
 }
 
-fn open_briefcase(
+fn open_duet(
     window: &adw::ApplicationWindow,
     navigation: &adw::NavigationView,
     toasts: &adw::ToastOverlay,
     root: PathBuf,
 ) {
-    let service = match BriefcaseService::open(&root) {
+    let service = match DuetService::open(&root) {
         Ok(service) => service,
         Err(error) => {
             show_error(toasts, &localized_error(&error));
@@ -304,7 +303,7 @@ fn open_briefcase(
     };
     remember(&root);
     let state = Rc::new(RefCell::new(UiState {
-        briefcase_root: Some(root),
+        duet_root: Some(root),
         source_root: Some(service.manifest.source.last_known_path.clone()),
         ..Default::default()
     }));
@@ -341,8 +340,8 @@ fn open_briefcase(
     locations.add(&source_row);
     locations.add(
         &adw::ActionRow::builder()
-            .title(&english("Briefcase"))
-            .subtitle(service.briefcase_root.to_string_lossy())
+            .title(&english("Duet"))
+            .subtitle(service.duet_root.to_string_lossy())
             .build(),
     );
     content.append(&locations);
@@ -455,7 +454,7 @@ fn run_compare(view: ViewComponents) {
     view.check_progress.set_visible(true);
     view.compare_button.set_sensitive(false);
     view.sync_button.set_sensitive(false);
-    let Some(root) = view.state.borrow().briefcase_root.clone() else {
+    let Some(root) = view.state.borrow().duet_root.clone() else {
         return;
     };
     let mode = if settings().string("change-detection-mode") == "verified" {
@@ -487,7 +486,7 @@ fn run_compare(view: ViewComponents) {
     glib::spawn_future_local(async move {
         let updates_for_worker = progress_updates.clone();
         let result = gio::spawn_blocking(move || {
-            let service = BriefcaseService::open(&root)?;
+            let service = DuetService::open(&root)?;
             service.compare_with_progress_and_cancel(
                 mode,
                 move |completed, total| {
@@ -503,7 +502,7 @@ fn run_compare(view: ViewComponents) {
         finish_sync_controls(&view);
         match result {
             Ok(Ok(plan)) => render_plan(&view, plan),
-            Ok(Err(BriefcaseError::Cancelled)) => {
+            Ok(Err(DuetError::Cancelled)) => {
                 view.summary.set_text(&english("Ready to check"));
             }
             Ok(Err(error)) => {
@@ -551,7 +550,7 @@ fn update_scan_progress(view: &ViewComponents, event: ScanProgressEvent) {
         return;
     }
     let fraction = (event.completed as f64 / event.total as f64).clamp(0.0, 1.0);
-    // A comparison scans Source and Briefcase in separate phases. Do not keep
+    // A comparison scans Source and Duet in separate phases. Do not keep
     // the previous phase's fraction or the second folder appears stuck at 100%.
     view.check_progress.set_fraction(fraction);
     view.check_progress
@@ -622,14 +621,14 @@ fn operation_row(op: &PlannedOperation) -> OperationWidgets {
     OperationWidgets { row, progress }
 }
 
-fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> OperationWidgets {
+fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWidgets {
     let row = adw::ActionRow::builder()
         .title(conflict.operation.relative_path.to_string_lossy())
         .subtitle(&english("Both copies changed — skipped until you choose"))
         .build();
     row.add_prefix(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
     let source_deleted = conflict.source.is_none();
-    let briefcase_deleted = conflict.briefcase.is_none();
+    let duet_deleted = conflict.duet.is_none();
     if !source_deleted {
         add_resolution_button(
             &row,
@@ -646,23 +645,23 @@ fn conflict_row(view: &ViewComponents, conflict: &gnome_briefcase::Conflict) -> 
             &english("Open Source Copy"),
         );
     }
-    if !briefcase_deleted {
+    if !duet_deleted {
         add_resolution_button(
             &row,
             view,
             &conflict.operation.relative_path,
-            &english("Keep Briefcase"),
-            english("Will keep Briefcase"),
-            ConflictResolution::KeepBriefcase,
+            &english("Keep Duet"),
+            english("Will keep Duet"),
+            ConflictResolution::KeepDuet,
         );
         add_open_button(
             &row,
-            view.state.borrow().briefcase_root.as_deref(),
+            view.state.borrow().duet_root.as_deref(),
             &conflict.operation.relative_path,
-            &english("Open Briefcase Copy"),
+            &english("Open Duet Copy"),
         );
     }
-    if source_deleted || briefcase_deleted {
+    if source_deleted || duet_deleted {
         add_resolution_button(
             &row,
             view,
@@ -727,7 +726,7 @@ fn add_open_button(row: &adw::ActionRow, root: Option<&Path>, relative: &Path, t
 
 fn run_sync(view: ViewComponents) {
     let plan = view.state.borrow().plan.clone();
-    let root = view.state.borrow().briefcase_root.clone();
+    let root = view.state.borrow().duet_root.clone();
     let resolutions = view.state.borrow().resolutions.clone();
     let (Some(plan), Some(root)) = (plan, root) else {
         return;
@@ -758,7 +757,7 @@ async fn prepare_deletions(view: &ViewComponents, mut plan: SyncPlan) -> Option<
     for operation in plan.operations.iter_mut().filter(|operation| {
         matches!(
             operation.action,
-            SyncAction::DeleteSource | SyncAction::DeleteBriefcase
+            SyncAction::DeleteSource | SyncAction::DeleteDuet
         )
     }) {
         let choice = if let Some(choice) = choice_for_remaining {
@@ -779,10 +778,10 @@ async fn ask_deletion_action(
     window: &adw::ApplicationWindow,
     operation: &PlannedOperation,
 ) -> Option<(DeletionChoice, bool)> {
-    let location = if operation.action == SyncAction::DeleteBriefcase {
+    let location = if operation.action == SyncAction::DeleteDuet {
         english("Source")
     } else {
-        english("Briefcase")
+        english("Duet")
     };
     let message =
         english("{path} was deleted from {location}. Choose what to do with the remaining copy.")
@@ -813,8 +812,8 @@ async fn ask_deletion_action(
 fn apply_deletion_choice(operation: &mut PlannedOperation, choice: DeletionChoice) {
     operation.action = match (choice, operation.action) {
         (DeletionChoice::Skip, _) => SyncAction::None,
-        (DeletionChoice::Restore, SyncAction::DeleteBriefcase) => SyncAction::BriefcaseToSource,
-        (DeletionChoice::Restore, SyncAction::DeleteSource) => SyncAction::SourceToBriefcase,
+        (DeletionChoice::Restore, SyncAction::DeleteDuet) => SyncAction::DuetToSource,
+        (DeletionChoice::Restore, SyncAction::DeleteSource) => SyncAction::SourceToDuet,
         (DeletionChoice::Delete, action) | (DeletionChoice::Restore, action) => action,
     };
 }
@@ -852,7 +851,7 @@ fn perform_sync(
     glib::spawn_future_local(async move {
         let updates_for_worker = progress_updates.clone();
         let result = gio::spawn_blocking(move || {
-            let service = BriefcaseService::open(&root)?;
+            let service = DuetService::open(&root)?;
             service.synchronize_with_progress_and_cancel(
                 &plan,
                 &resolutions,
@@ -886,7 +885,7 @@ fn perform_sync(
                 view.toasts.add_toast(adw::Toast::new(&message));
                 run_compare(view);
             }
-            Ok(Err(BriefcaseError::Cancelled)) => {
+            Ok(Err(DuetError::Cancelled)) => {
                 view.toasts
                     .add_toast(adw::Toast::new(&english("Synchronization stopped")));
                 run_compare(view);
@@ -942,12 +941,12 @@ fn locate_source(view: ViewComponents, row: adw::ActionRow) {
         let Some(source) = folder.path() else {
             return;
         };
-        let Some(root) = view.state.borrow().briefcase_root.clone() else {
+        let Some(root) = view.state.borrow().duet_root.clone() else {
             return;
         };
         let source_for_task = source.clone();
         let result = gio::spawn_blocking(move || {
-            let mut service = BriefcaseService::open(&root)?;
+            let mut service = DuetService::open(&root)?;
             service.rebind_source(&source_for_task)
         })
         .await;
@@ -968,10 +967,10 @@ fn locate_source(view: ViewComponents, row: adw::ActionRow) {
 
 fn action_label(action: SyncAction) -> String {
     match action {
-        SyncAction::SourceToBriefcase => english("Changed in Source → Briefcase"),
-        SyncAction::BriefcaseToSource => english("Changed in Briefcase → Source"),
-        SyncAction::DeleteSource => english("Deleted in Briefcase → delete from Source"),
-        SyncAction::DeleteBriefcase => english("Deleted in Source → delete from Briefcase"),
+        SyncAction::SourceToDuet => english("Changed in Source → Duet"),
+        SyncAction::DuetToSource => english("Changed in Duet → Source"),
+        SyncAction::DeleteSource => english("Deleted in Duet → delete from Source"),
+        SyncAction::DeleteDuet => english("Deleted in Source → delete from Duet"),
         SyncAction::RemoveBaseline => english("Deleted from both copies"),
         SyncAction::Adopt => english("Equal content on both sides"),
         SyncAction::Conflict => english("Conflict"),
@@ -986,7 +985,7 @@ fn settings() -> gio::Settings {
 fn remember(root: &Path) {
     let settings = settings();
     let mut values: Vec<String> = settings
-        .strv("known-briefcases")
+        .strv("known-duets")
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -995,20 +994,20 @@ fn remember(root: &Path) {
         values.push(value);
     }
     let refs: Vec<&str> = values.iter().map(String::as_str).collect();
-    let _ = settings.set_strv("known-briefcases", refs);
+    let _ = settings.set_strv("known-duets", refs);
 }
 
 fn forget(root: &Path) {
     let settings = settings();
     let value = root.to_string_lossy();
     let values: Vec<String> = settings
-        .strv("known-briefcases")
+        .strv("known-duets")
         .iter()
         .filter(|item| item.as_str() != value)
         .map(|item| item.to_string())
         .collect();
     let refs: Vec<&str> = values.iter().map(String::as_str).collect();
-    let _ = settings.set_strv("known-briefcases", refs);
+    let _ = settings.set_strv("known-duets", refs);
 }
 
 fn header_bar() -> adw::HeaderBar {
@@ -1016,7 +1015,7 @@ fn header_bar() -> adw::HeaderBar {
     let menu = gio::Menu::new();
     menu.append(Some(&english("Preferences")), Some("app.preferences"));
     menu.append(Some(&english("Help")), Some("app.help"));
-    menu.append(Some(&english("About Briefcase")), Some("app.about"));
+    menu.append(Some(&english("About Duet")), Some("app.about"));
     let button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .menu_model(&menu)
@@ -1106,26 +1105,26 @@ fn install_actions(app: &adw::Application) {
                 return;
             };
             let dialog = adw::PreferencesDialog::new();
-            dialog.set_title(&english("Briefcase Help"));
+            dialog.set_title(&english("Duet Help"));
             let page = adw::PreferencesPage::new();
 
             let guide = adw::PreferencesGroup::builder()
                 .title(&english("Quick Guide"))
                 .description(&english(
-                    "Briefcase synchronizes a Source folder with a portable Briefcase folder only when you ask it to.",
+                    "Duet synchronizes a Source folder with a portable Duet folder only when you ask it to.",
                 ))
                 .build();
             add_help_row(
                 &guide,
                 "document-new-symbolic",
-                &english("Create a Briefcase"),
+                &english("Create a Duet"),
                 &english("Choose the Source first, then a destination such as a USB drive."),
             );
             add_help_row(
                 &guide,
                 "document-open-symbolic",
-                &english("Open a Briefcase"),
-                &english("Open an existing Briefcase folder to add it to the home screen."),
+                &english("Open a Duet"),
+                &english("Open an existing Duet folder to add it to the home screen."),
             );
             add_help_row(
                 &guide,
@@ -1172,12 +1171,12 @@ fn install_actions(app: &adw::Application) {
                 return;
             };
             let dialog = adw::AboutDialog::builder()
-                .application_name(&english("Briefcase"))
+                .application_name(&english(APP_NAME))
                 .application_icon(APP_ID)
                 .version(env!("CARGO_PKG_VERSION"))
-                .developer_name(&english("GNOME Briefcase contributors"))
+                .developer_name(&english("Duet contributors"))
                 .license_type(gtk::License::Gpl30)
-                .website("https://github.com/rtomasa/gnome-briefcase")
+                .website("https://github.com/rtomasa/duet")
                 .build();
             dialog.present(Some(&window));
         }
@@ -1197,47 +1196,43 @@ fn add_help_row(group: &adw::PreferencesGroup, icon: &str, title: &str, subtitle
     group.add(&row);
 }
 
-fn localized_error(error: &BriefcaseError) -> String {
+fn localized_error(error: &DuetError) -> String {
     match error {
-        BriefcaseError::Io { path, source } => english("Could not access {path}: {error}")
+        DuetError::Io { path, source } => english("Could not access {path}: {error}")
             .replace("{path}", &path.to_string_lossy())
             .replace("{error}", &source.to_string()),
-        BriefcaseError::InvalidBriefcase(path) => {
-            english("The folder is not a valid Briefcase: {path}")
-                .replace("{path}", &path.to_string_lossy())
-        }
-        BriefcaseError::DestinationNotEmpty(path) => {
+        DuetError::InvalidDuet(path) => english("The folder is not a valid Duet: {path}")
+            .replace("{path}", &path.to_string_lossy()),
+        DuetError::DestinationNotEmpty(path) => {
             english("The destination folder already exists and is not empty: {path}")
                 .replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::OverlappingRoots => {
-            english("The Source and Briefcase folders cannot contain one another")
+        DuetError::OverlappingRoots => {
+            english("The Source and Duet folders cannot contain one another")
         }
-        BriefcaseError::UnsafePath(path) => {
+        DuetError::UnsafePath(path) => {
             english("The path “{path}” does not remain inside the synchronized folder")
                 .replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::UnsupportedSymlink(path) => {
+        DuetError::UnsupportedSymlink(path) => {
             english("Symbolic links are not supported yet: {path}")
                 .replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::AlreadyLocked => {
-            english("Another synchronization is modifying this Briefcase")
-        }
-        BriefcaseError::Cancelled => english("Synchronization was stopped"),
-        BriefcaseError::SourceUnavailable(path) => {
+        DuetError::AlreadyLocked => english("Another synchronization is modifying this Duet"),
+        DuetError::Cancelled => english("Synchronization was stopped"),
+        DuetError::SourceUnavailable(path) => {
             english("The Source is unavailable: {path}").replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::UnresolvedConflict(path) => {
+        DuetError::UnresolvedConflict(path) => {
             english("Unresolved conflict: {path}").replace("{path}", &path.to_string_lossy())
         }
-        BriefcaseError::Database(source) => {
+        DuetError::Database(source) => {
             english("Database error: {error}").replace("{error}", &source.to_string())
         }
-        BriefcaseError::Manifest(source) => {
-            english("Invalid Briefcase metadata: {error}").replace("{error}", &source.to_string())
+        DuetError::Manifest(source) => {
+            english("Invalid Duet metadata: {error}").replace("{error}", &source.to_string())
         }
-        BriefcaseError::Other(source) => source.to_string(),
+        DuetError::Other(source) => source.to_string(),
     }
 }
 
@@ -1250,14 +1245,14 @@ fn show_error(toasts: &adw::ToastOverlay, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gnome_briefcase::ChangeState;
+    use duet::ChangeState;
 
     fn deletion(action: SyncAction) -> PlannedOperation {
         PlannedOperation {
             relative_path: PathBuf::from("deleted.txt"),
             kind: EntryKind::File,
             source_state: ChangeState::Unchanged,
-            briefcase_state: ChangeState::Deleted,
+            duet_state: ChangeState::Deleted,
             action,
         }
     }
@@ -1270,7 +1265,7 @@ mod tests {
 
         let mut restored = deletion(SyncAction::DeleteSource);
         apply_deletion_choice(&mut restored, DeletionChoice::Restore);
-        assert_eq!(restored.action, SyncAction::SourceToBriefcase);
+        assert_eq!(restored.action, SyncAction::SourceToDuet);
 
         let mut deleted = deletion(SyncAction::DeleteSource);
         apply_deletion_choice(&mut deleted, DeletionChoice::Delete);

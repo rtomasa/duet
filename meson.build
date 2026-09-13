@@ -1,9 +1,9 @@
-project('gnome-briefcase', 'rust', version: '0.1.1', meson_version: '>= 0.63')
+project('duet', 'rust', version: '0.1.1', meson_version: '>= 0.63')
 
 gnome = import('gnome')
 cargo = find_program('cargo')
 
-app_id = 'io.github.rtomasa.Briefcase'
+app_id = 'io.github.rtomasa.Duet'
 prefix = get_option('prefix')
 datadir = prefix / get_option('datadir')
 
@@ -30,11 +30,11 @@ install_data(
 
 target_dir = meson.current_build_dir() / 'cargo-target'
 binary = custom_target(
-  'gnome-briefcase-binary',
-  output: 'gnome-briefcase',
+  'duet-binary',
+  output: 'duet',
   command: [
     find_program('sh'), '-c',
-    'CARGO_TARGET_DIR="$1" "$2" build --locked --release --features gui --manifest-path "$3" && cp "$1/release/gnome-briefcase" "$4"',
+    'CARGO_TARGET_DIR="$1" "$2" build --locked --release --features gui --manifest-path "$3" && cp "$1/release/duet" "$4"',
     'cargo-build', target_dir, cargo.full_path(), meson.project_source_root() / 'Cargo.toml', '@OUTPUT@',
   ],
   build_by_default: true,

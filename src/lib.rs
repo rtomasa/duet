@@ -4,6 +4,6 @@ pub mod persistence;
 pub mod sync;
 
 pub use domain::*;
-pub use error::{BriefcaseError, Result};
+pub use error::{DuetError, Result};
 pub use persistence::{Database, ManifestRepository};
-pub use sync::{BriefcaseService, ScanMode};
+pub use sync::{DuetService, ScanMode};

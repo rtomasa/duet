@@ -8,8 +8,8 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(briefcase_root: &Path) -> Result<Self> {
-        let path = briefcase_root.join(".briefcase/state.sqlite");
+    pub fn open(duet_root: &Path) -> Result<Self> {
+        let path = duet_root.join(".duet/state.sqlite");
         let conn = Connection::open(&path)?;
         conn.pragma_update(None, "journal_mode", "DELETE")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -20,19 +20,19 @@ impl Database {
 
     fn migrate(&self) -> Result<()> {
         self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS briefcase (
+            "CREATE TABLE IF NOT EXISTS duet (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 last_sync_at TEXT
              );
-             INSERT OR IGNORE INTO briefcase(singleton) VALUES (1);
+             INSERT OR IGNORE INTO duet(singleton) VALUES (1);
              CREATE TABLE IF NOT EXISTS entries (
                 relative_path TEXT PRIMARY KEY,
                 entry_type TEXT NOT NULL,
                 baseline_hash TEXT,
                 source_size INTEGER,
                 source_mtime_ns INTEGER,
-                briefcase_size INTEGER,
-                briefcase_mtime_ns INTEGER,
+                duet_size INTEGER,
+                duet_mtime_ns INTEGER,
                 last_sync_at TEXT NOT NULL
              );
              CREATE TABLE IF NOT EXISTS transactions (
@@ -58,7 +58,7 @@ impl Database {
     pub fn entries(&self) -> Result<BTreeMap<PathBuf, BaselineEntry>> {
         let mut stmt = self.conn.prepare(
             "SELECT relative_path, entry_type, baseline_hash,
-                    source_size, source_mtime_ns, briefcase_size, briefcase_mtime_ns
+                    source_size, source_mtime_ns, duet_size, duet_mtime_ns
              FROM entries ORDER BY relative_path",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -74,8 +74,8 @@ impl Database {
                 baseline_hash: row.get(2)?,
                 source_size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
                 source_mtime_ns: row.get(4)?,
-                briefcase_size: row.get::<_, Option<i64>>(5)?.map(|v| v as u64),
-                briefcase_mtime_ns: row.get(6)?,
+                duet_size: row.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                duet_mtime_ns: row.get(6)?,
             })
         })?;
         let mut result = BTreeMap::new();
@@ -125,7 +125,7 @@ impl Database {
             params![transaction_id, chrono::Utc::now().to_rfc3339()],
         )?;
         self.conn.execute(
-            "UPDATE briefcase SET last_sync_at = ?1 WHERE singleton = 1",
+            "UPDATE duet SET last_sync_at = ?1 WHERE singleton = 1",
             params![chrono::Utc::now().to_rfc3339()],
         )?;
         Ok(())
@@ -152,15 +152,15 @@ impl Database {
             tx.execute(
                 "INSERT INTO entries (
                     relative_path, entry_type, baseline_hash,
-                    source_size, source_mtime_ns, briefcase_size, briefcase_mtime_ns, last_sync_at
+                    source_size, source_mtime_ns, duet_size, duet_mtime_ns, last_sync_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(relative_path) DO UPDATE SET
                     entry_type=excluded.entry_type,
                     baseline_hash=excluded.baseline_hash,
                     source_size=excluded.source_size,
                     source_mtime_ns=excluded.source_mtime_ns,
-                    briefcase_size=excluded.briefcase_size,
-                    briefcase_mtime_ns=excluded.briefcase_mtime_ns,
+                    duet_size=excluded.duet_size,
+                    duet_mtime_ns=excluded.duet_mtime_ns,
                     last_sync_at=excluded.last_sync_at",
                 params![
                     entry.relative_path.to_string_lossy(),
@@ -171,8 +171,8 @@ impl Database {
                     entry.baseline_hash,
                     entry.source_size.map(|value| value as i64),
                     entry.source_mtime_ns,
-                    entry.briefcase_size.map(|value| value as i64),
-                    entry.briefcase_mtime_ns,
+                    entry.duet_size.map(|value| value as i64),
+                    entry.duet_mtime_ns,
                     now,
                 ],
             )?;
@@ -187,7 +187,7 @@ impl Database {
             params![transaction_id, now],
         )?;
         tx.execute(
-            "UPDATE briefcase SET last_sync_at = ?1 WHERE singleton = 1",
+            "UPDATE duet SET last_sync_at = ?1 WHERE singleton = 1",
             params![now],
         )?;
         tx.commit()?;
@@ -218,15 +218,15 @@ impl Database {
         self.conn.execute(
             "INSERT INTO entries (
                 relative_path, entry_type, baseline_hash,
-                source_size, source_mtime_ns, briefcase_size, briefcase_mtime_ns, last_sync_at
+                source_size, source_mtime_ns, duet_size, duet_mtime_ns, last_sync_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(relative_path) DO UPDATE SET
                 entry_type=excluded.entry_type,
                 baseline_hash=excluded.baseline_hash,
                 source_size=excluded.source_size,
                 source_mtime_ns=excluded.source_mtime_ns,
-                briefcase_size=excluded.briefcase_size,
-                briefcase_mtime_ns=excluded.briefcase_mtime_ns,
+                duet_size=excluded.duet_size,
+                duet_mtime_ns=excluded.duet_mtime_ns,
                 last_sync_at=excluded.last_sync_at",
             params![
                 entry.relative_path.to_string_lossy(),
@@ -237,8 +237,8 @@ impl Database {
                 entry.baseline_hash,
                 entry.source_size.map(|v| v as i64),
                 entry.source_mtime_ns,
-                entry.briefcase_size.map(|v| v as i64),
-                entry.briefcase_mtime_ns,
+                entry.duet_size.map(|v| v as i64),
+                entry.duet_mtime_ns,
                 chrono::Utc::now().to_rfc3339(),
             ],
         )?;
@@ -253,7 +253,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn path(briefcase_root: &Path) -> PathBuf {
-        briefcase_root.join(".briefcase/state.sqlite")
+    pub fn path(duet_root: &Path) -> PathBuf {
+        duet_root.join(".duet/state.sqlite")
     }
 }

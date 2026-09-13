@@ -1,5 +1,5 @@
 use super::hashing;
-use crate::{BaselineEntry, BriefcaseError, EntryKind, FileSnapshot, Result};
+use crate::{BaselineEntry, DuetError, EntryKind, FileSnapshot, Result};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub enum ScanMode {
 #[derive(Debug, Clone, Copy)]
 pub enum ScanSide {
     Source,
-    Briefcase,
+    Duet,
 }
 
 pub fn scan_with_progress_and_cancel<F, C>(
@@ -36,20 +36,20 @@ where
     C: Fn() -> bool + Sync,
 {
     if !root.is_dir() {
-        return Err(BriefcaseError::SourceUnavailable(root.to_path_buf()));
+        return Err(DuetError::SourceUnavailable(root.to_path_buf()));
     }
     let mut snapshots = Vec::new();
     let mut hash_tasks = Vec::new();
     let walker = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| entry.path() == root || entry.file_name() != ".briefcase");
+        .filter_entry(|entry| entry.path() == root || entry.file_name() != ".duet");
 
     for item in walker {
         check_cancelled(&is_cancelled)?;
         let item = item.map_err(|e| {
             let path = e.path().unwrap_or(root).to_path_buf();
-            BriefcaseError::io(path, std::io::Error::other(e))
+            DuetError::io(path, std::io::Error::other(e))
         })?;
         let path = item.path();
         if path == root {
@@ -57,12 +57,12 @@ where
         }
         let relative = path
             .strip_prefix(root)
-            .map_err(|_| BriefcaseError::UnsafePath(path.into()))?;
+            .map_err(|_| DuetError::UnsafePath(path.into()))?;
         validate_relative(relative)?;
-        let metadata = fs::symlink_metadata(path).map_err(|e| BriefcaseError::io(path, e))?;
+        let metadata = fs::symlink_metadata(path).map_err(|e| DuetError::io(path, e))?;
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            return Err(BriefcaseError::UnsupportedSymlink(relative.to_path_buf()));
+            return Err(DuetError::UnsupportedSymlink(relative.to_path_buf()));
         }
         let kind = if file_type.is_dir() {
             EntryKind::Directory
@@ -182,7 +182,7 @@ where
         for (snapshot_index, result) in receiver {
             match result {
                 Ok(hash) => snapshots[snapshot_index].hash = Some(hash),
-                Err(BriefcaseError::Cancelled) => was_cancelled = true,
+                Err(DuetError::Cancelled) => was_cancelled = true,
                 Err(error) if first_error.is_none() => first_error = Some(error),
                 Err(_) => {}
             }
@@ -193,14 +193,14 @@ where
         return Err(error);
     }
     if was_cancelled {
-        return Err(BriefcaseError::Cancelled);
+        return Err(DuetError::Cancelled);
     }
     check_cancelled(is_cancelled)
 }
 
 fn check_cancelled(is_cancelled: &dyn Fn() -> bool) -> Result<()> {
     if is_cancelled() {
-        Err(BriefcaseError::Cancelled)
+        Err(DuetError::Cancelled)
     } else {
         Ok(())
     }
@@ -217,9 +217,7 @@ fn metadata_matches(
         ScanSide::Source => {
             entry.source_size == Some(size) && entry.source_mtime_ns == Some(mtime_ns)
         }
-        ScanSide::Briefcase => {
-            entry.briefcase_size == Some(size) && entry.briefcase_mtime_ns == Some(mtime_ns)
-        }
+        ScanSide::Duet => entry.duet_size == Some(size) && entry.duet_mtime_ns == Some(mtime_ns),
     }
 }
 
@@ -230,7 +228,7 @@ pub fn validate_relative(path: &Path) -> Result<()> {
             .components()
             .any(|part| !matches!(part, std::path::Component::Normal(_)))
     {
-        return Err(BriefcaseError::UnsafePath(path.to_path_buf()));
+        return Err(DuetError::UnsafePath(path.to_path_buf()));
     }
     Ok(())
 }
@@ -287,6 +285,6 @@ mod tests {
             || cancelled.load(Ordering::Relaxed),
         );
 
-        assert!(matches!(result, Err(BriefcaseError::Cancelled)));
+        assert!(matches!(result, Err(DuetError::Cancelled)));
     }
 }

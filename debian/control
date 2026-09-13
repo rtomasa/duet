@@ -1,15 +1,15 @@
-Source: gnome-briefcase
+Source: duet
 Section: utils
 Priority: optional
-Maintainer: GNOME Briefcase contributors <noreply@example.com>
+Maintainer: Duet contributors <noreply@example.com>
 Build-Depends: debhelper-compat (= 13), meson, cargo, rustc, libgtk-4-dev (>= 4.10), libadwaita-1-dev (>= 1.5)
 Standards-Version: 4.6.2
-Homepage: https://github.com/rtomasa/gnome-briefcase
+Homepage: https://github.com/rtomasa/duet
 Rules-Requires-Root: no
 
-Package: gnome-briefcase
+Package: duet
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Simple bidirectional folder synchronization for GNOME
- Briefcase synchronizes a source folder and a portable copy on demand,
+ Duet synchronizes a source folder and a portable copy on demand,
  with an understandable review and explicit conflict handling.
