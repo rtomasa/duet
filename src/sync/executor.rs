@@ -45,25 +45,8 @@ impl Drop for MutationLock {
 
 pub fn ordered(operations: &[PlannedOperation]) -> Vec<PlannedOperation> {
     let mut result = operations.to_vec();
-    result.sort_by_key(order_key);
+    result.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     result
-}
-
-fn order_key(op: &PlannedOperation) -> (u8, usize, PathBuf) {
-    let depth = op.relative_path.components().count();
-    let phase = match (op.action, op.kind) {
-        (SyncAction::SourceToDuet | SyncAction::DuetToSource, EntryKind::Directory) => 0,
-        (SyncAction::SourceToDuet | SyncAction::DuetToSource, EntryKind::File) => 1,
-        (SyncAction::DeleteSource | SyncAction::DeleteDuet, EntryKind::File) => 2,
-        (SyncAction::DeleteSource | SyncAction::DeleteDuet, EntryKind::Directory) => 3,
-        _ => 4,
-    };
-    let depth_order = if phase == 3 {
-        usize::MAX - depth
-    } else {
-        depth
-    };
-    (phase, depth_order, op.relative_path.clone())
 }
 
 pub fn apply_one_with_progress(
@@ -315,4 +298,41 @@ fn checked_parent(root: &Path, destination: &Path) -> Result<()> {
         return Err(DuetError::UnsafePath(destination.into()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn operation(path: &str, action: SyncAction) -> PlannedOperation {
+        PlannedOperation {
+            relative_path: PathBuf::from(path),
+            kind: EntryKind::File,
+            source_state: crate::ChangeState::Created,
+            duet_state: crate::ChangeState::Missing,
+            action,
+        }
+    }
+
+    #[test]
+    fn operations_are_sorted_alphabetically_by_relative_path() {
+        let ordered = ordered(&[
+            operation("zeta.bin", SyncAction::SourceToDuet),
+            operation("alpha.bin", SyncAction::DuetToSource),
+            operation("games/arcade.bin", SyncAction::DeleteDuet),
+        ]);
+
+        let paths: Vec<_> = ordered
+            .iter()
+            .map(|operation| operation.relative_path.as_path())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                Path::new("alpha.bin"),
+                Path::new("games/arcade.bin"),
+                Path::new("zeta.bin"),
+            ]
+        );
+    }
 }

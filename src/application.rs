@@ -636,23 +636,38 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     view.summary.set_text(&format!(
         "{total_label} · {changes_label} · {conflicts_label}"
     ));
-    for op in plan
+    enum VisibleEntry<'a> {
+        Operation(&'a PlannedOperation),
+        Conflict(&'a duet::Conflict),
+    }
+    impl VisibleEntry<'_> {
+        fn path(&self) -> &Path {
+            match self {
+                Self::Operation(operation) => &operation.relative_path,
+                Self::Conflict(conflict) => &conflict.operation.relative_path,
+            }
+        }
+    }
+    let mut entries: Vec<_> = plan
         .operations
         .iter()
         .filter(|op| !matches!(op.action, SyncAction::None | SyncAction::RecordBaseline))
-    {
-        let widgets = operation_row(op);
+        .map(VisibleEntry::Operation)
+        .chain(plan.conflicts.iter().map(VisibleEntry::Conflict))
+        .collect();
+    entries.sort_by(|left, right| left.path().cmp(right.path()));
+    for entry in entries {
+        let (path, widgets) = match entry {
+            VisibleEntry::Operation(operation) => {
+                (operation.relative_path.clone(), operation_row(operation))
+            }
+            VisibleEntry::Conflict(conflict) => (
+                conflict.operation.relative_path.clone(),
+                conflict_row(view, conflict),
+            ),
+        };
         view.list.append(&widgets.row);
-        view.operation_rows
-            .borrow_mut()
-            .insert(op.relative_path.clone(), widgets);
-    }
-    for conflict in &plan.conflicts {
-        let widgets = conflict_row(view, conflict);
-        view.list.append(&widgets.row);
-        view.operation_rows
-            .borrow_mut()
-            .insert(conflict.operation.relative_path.clone(), widgets);
+        view.operation_rows.borrow_mut().insert(path, widgets);
     }
     if changes == 0 && conflicts == 0 {
         let synchronized_subtitle = if baseline_repairs > 0 {
