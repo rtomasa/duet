@@ -30,6 +30,11 @@
       <summary>Skip hidden files</summary>
       <description>Ignore files and folders whose names begin with a period when comparing folders</description>
     </key>
+    <key name="copy-symbolic-links" type="b">
+      <default>true</default>
+      <summary>Copy symbolic links</summary>
+      <description>Copy symbolic links as links instead of skipping them when comparing folders</description>
+    </key>
     <key name="window-width" type="i"><default>720</default></key>
     <key name="window-height" type="i"><default>620</default></key>
   </schema>

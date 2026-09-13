@@ -556,6 +556,7 @@ fn run_compare(view: ViewComponents) {
     view.stop_button.set_sensitive(true);
     view.stop_button.set_visible(true);
     let skip_hidden_files = settings().boolean("skip-hidden-files");
+    let copy_symbolic_links = settings().boolean("copy-symbolic-links");
     // Keep only the newest scan update. Large folder trees can produce updates
     // faster than the GTK main thread can redraw them.
     let progress_updates = Arc::new(Mutex::new(None::<ScanProgressEvent>));
@@ -577,6 +578,7 @@ fn run_compare(view: ViewComponents) {
             let service = DuetService::open(&root)?;
             service.compare_with_progress_and_cancel(
                 skip_hidden_files,
+                copy_symbolic_links,
                 move |completed, total| {
                     if let Ok(mut latest) = updates_for_worker.lock() {
                         *latest = Some(ScanProgressEvent { completed, total });
@@ -798,6 +800,7 @@ fn operation_row(
     row.add_prefix(&gtk::Image::from_icon_name(match op.kind {
         EntryKind::File => "text-x-generic-symbolic",
         EntryKind::Directory => "folder-symbolic",
+        EntryKind::SymbolicLink => "emblem-symbolic-link-symbolic",
     }));
     let progress = operation_progress_bar();
     row.add_suffix(&progress);
@@ -1585,6 +1588,16 @@ fn install_actions(app: &adw::Application) {
                 let _ = settings_copy.set_boolean("skip-hidden-files", row.is_active());
             });
             group.add(&skip_hidden_files);
+            let copy_symbolic_links = adw::SwitchRow::builder()
+                .title(&english("Copy symbolic links"))
+                .subtitle(&english("Preserve symbolic links instead of skipping them"))
+                .active(settings.boolean("copy-symbolic-links"))
+                .build();
+            let settings_copy = settings.clone();
+            copy_symbolic_links.connect_active_notify(move |row| {
+                let _ = settings_copy.set_boolean("copy-symbolic-links", row.is_active());
+            });
+            group.add(&copy_symbolic_links);
             page.add(&group);
             dialog.add(&page);
             dialog.present(Some(&window));

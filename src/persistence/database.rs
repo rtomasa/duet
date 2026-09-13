@@ -65,10 +65,10 @@ impl Database {
             let kind: String = row.get(1)?;
             Ok(BaselineEntry {
                 relative_path: PathBuf::from(path),
-                kind: if kind == "directory" {
-                    EntryKind::Directory
-                } else {
-                    EntryKind::File
+                kind: match kind.as_str() {
+                    "directory" => EntryKind::Directory,
+                    "symbolic_link" => EntryKind::SymbolicLink,
+                    _ => EntryKind::File,
                 },
                 source_size: row.get::<_, Option<i64>>(2)?.map(|v| v as u64),
                 source_mtime_ns: row.get(3)?,
@@ -164,6 +164,7 @@ impl Database {
                     match entry.kind {
                         EntryKind::File => "file",
                         EntryKind::Directory => "directory",
+                        EntryKind::SymbolicLink => "symbolic_link",
                     },
                     entry.source_size.map(|value| value as i64),
                     entry.source_mtime_ns,
@@ -228,6 +229,7 @@ impl Database {
                 match entry.kind {
                     EntryKind::File => "file",
                     EntryKind::Directory => "directory",
+                    EntryKind::SymbolicLink => "symbolic_link",
                 },
                 entry.source_size.map(|v| v as i64),
                 entry.source_mtime_ns,

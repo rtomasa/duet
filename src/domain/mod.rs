@@ -23,6 +23,7 @@ pub struct SourceLocator {
 pub enum EntryKind {
     File,
     Directory,
+    SymbolicLink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

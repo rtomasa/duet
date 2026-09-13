@@ -63,12 +63,13 @@ impl DuetService {
     }
 
     pub fn compare(&self) -> Result<SyncPlan> {
-        self.compare_with_progress_and_cancel(false, |_, _| {}, || false)
+        self.compare_with_progress_and_cancel(false, true, |_, _| {}, || false)
     }
 
     pub fn compare_with_progress_and_cancel<F, C>(
         &self,
         skip_hidden_files: bool,
+        copy_symbolic_links: bool,
         progress: F,
         is_cancelled: C,
     ) -> Result<SyncPlan>
@@ -83,12 +84,14 @@ impl DuetService {
         let source = scanner::scan_with_progress_and_cancel(
             &self.manifest.source.last_known_path,
             skip_hidden_files,
+            copy_symbolic_links,
             &progress,
             &is_cancelled,
         )?;
         let duet = scanner::scan_with_progress_and_cancel(
             &self.duet_root,
             skip_hidden_files,
+            copy_symbolic_links,
             &progress,
             &is_cancelled,
         )?;
@@ -402,6 +405,31 @@ mod tests {
         assert!(!source.join(".duet").exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn initial_sync_preserves_symbolic_links_without_following_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let duet = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        std::os::unix::fs::symlink("missing-target", source.join("shortcut")).unwrap();
+
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
+        let plan = service.compare().unwrap();
+        assert_eq!(plan.operations[0].kind, crate::EntryKind::SymbolicLink);
+        service.synchronize(&plan, &BTreeMap::new()).unwrap();
+
+        let copied = duet.join("shortcut");
+        assert!(fs::symlink_metadata(&copied)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_link(copied).unwrap(),
+            PathBuf::from("missing-target")
+        );
+    }
+
     #[test]
     fn skipping_hidden_files_leaves_previously_synced_hidden_files_untouched() {
         let temp = tempfile::tempdir().unwrap();
@@ -415,7 +443,7 @@ mod tests {
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
 
         let plan = service
-            .compare_with_progress_and_cancel(true, |_, _| {}, || false)
+            .compare_with_progress_and_cancel(true, true, |_, _| {}, || false)
             .unwrap();
 
         assert!(!plan
@@ -681,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_nested_roots_and_symlinks() {
+    fn rejects_nested_roots() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
         fs::create_dir_all(&source).unwrap();
@@ -689,16 +717,6 @@ mod tests {
             DuetService::create(&source, &source.join("portable"), "Bad"),
             Err(DuetError::OverlappingRoots)
         ));
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink("/tmp", source.join("escape")).unwrap();
-            let duet = temp.path().join("portable");
-            let service = DuetService::create(&source, &duet, "Test").unwrap();
-            assert!(matches!(
-                service.compare(),
-                Err(DuetError::UnsupportedSymlink(_))
-            ));
-        }
     }
 
     #[cfg(unix)]

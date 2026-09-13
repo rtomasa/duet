@@ -8,6 +8,7 @@ use walkdir::WalkDir;
 pub fn scan_with_progress_and_cancel<F, C>(
     root: &Path,
     skip_hidden_files: bool,
+    copy_symbolic_links: bool,
     progress: F,
     is_cancelled: C,
 ) -> Result<BTreeMap<PathBuf, FileSnapshot>>
@@ -49,10 +50,12 @@ where
         validate_relative(relative)?;
         let metadata = fs::symlink_metadata(path).map_err(|e| DuetError::io(path, e))?;
         let file_type = metadata.file_type();
-        if file_type.is_symlink() {
-            return Err(DuetError::UnsupportedSymlink(relative.to_path_buf()));
+        if file_type.is_symlink() && !copy_symbolic_links {
+            continue;
         }
-        let kind = if file_type.is_dir() {
+        let kind = if file_type.is_symlink() {
+            EntryKind::SymbolicLink
+        } else if file_type.is_dir() {
             EntryKind::Directory
         } else {
             EntryKind::File
@@ -66,7 +69,7 @@ where
                     .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
             })
             .unwrap_or(0);
-        let size = if kind == EntryKind::File {
+        let size = if matches!(kind, EntryKind::File | EntryKind::SymbolicLink) {
             metadata.len()
         } else {
             0
@@ -132,6 +135,7 @@ mod tests {
         let snapshots = scan_with_progress_and_cancel(
             temp.path(),
             false,
+            true,
             |completed, total| events.lock().unwrap().push((completed, total)),
             || false,
         )
@@ -154,6 +158,7 @@ mod tests {
         let result = scan_with_progress_and_cancel(
             temp.path(),
             false,
+            true,
             |completed, total| {
                 if completed > 0 && total == 0 {
                     cancelled.store(true, Ordering::Relaxed);
@@ -174,9 +179,24 @@ mod tests {
         fs::write(temp.path().join(".hidden/nested.txt"), b"hidden").unwrap();
 
         let snapshots =
-            scan_with_progress_and_cancel(temp.path(), true, |_, _| {}, || false).unwrap();
+            scan_with_progress_and_cancel(temp.path(), true, true, |_, _| {}, || false).unwrap();
 
         assert_eq!(snapshots.len(), 1);
         assert!(snapshots.contains_key(Path::new("visible.txt")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_copies_or_skips_symbolic_links() {
+        let temp = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("missing-target", temp.path().join("link")).unwrap();
+
+        let copied =
+            scan_with_progress_and_cancel(temp.path(), false, true, |_, _| {}, || false).unwrap();
+        assert_eq!(copied[Path::new("link")].kind, EntryKind::SymbolicLink);
+
+        let skipped =
+            scan_with_progress_and_cancel(temp.path(), false, false, |_, _| {}, || false).unwrap();
+        assert!(!skipped.contains_key(Path::new("link")));
     }
 }

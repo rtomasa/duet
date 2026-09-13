@@ -108,8 +108,20 @@ fn copy_entry(
     progress: &mut dyn FnMut(u64, u64),
     is_cancelled: &dyn Fn() -> bool,
 ) -> Result<Option<CopiedMetadata>> {
-    let from = checked_existing(from_root, relative)?;
     let to = checked_destination(to_root, relative)?;
+    if kind == EntryKind::SymbolicLink {
+        let from = checked_symbolic_link(from_root, relative)?;
+        return copy_symbolic_link(
+            &from,
+            to_root,
+            &to,
+            relative,
+            expected,
+            progress,
+            is_cancelled,
+        );
+    }
+    let from = checked_existing(from_root, relative)?;
     if kind == EntryKind::Directory {
         fs::create_dir_all(&to).map_err(|e| DuetError::io(&to, e))?;
         checked_parent(to_root, &to)?;
@@ -203,6 +215,46 @@ fn copy_entry(
     }))
 }
 
+fn copy_symbolic_link(
+    from: &Path,
+    to_root: &Path,
+    to: &Path,
+    relative: &Path,
+    expected: Option<&FileSnapshot>,
+    progress: &mut dyn FnMut(u64, u64),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<Option<CopiedMetadata>> {
+    check_cancelled(is_cancelled)?;
+    let from_metadata = fs::symlink_metadata(from).map_err(|e| DuetError::io(from, e))?;
+    ensure_matches_checked_snapshot(relative, &from_metadata, expected)?;
+    if !from_metadata.file_type().is_symlink() {
+        return Err(changed_after_check(relative));
+    }
+    let target = fs::read_link(from).map_err(|e| DuetError::io(from, e))?;
+    let parent = to
+        .parent()
+        .ok_or_else(|| DuetError::UnsafePath(to.into()))?;
+    fs::create_dir_all(parent).map_err(|e| DuetError::io(parent, e))?;
+    checked_parent(to_root, to)?;
+    if to.exists() || fs::symlink_metadata(to).is_ok() {
+        fs::remove_file(to).map_err(|e| DuetError::io(to, e))?;
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, to).map_err(|e| DuetError::io(to, e))?;
+    #[cfg(not(unix))]
+    return Err(DuetError::UnsupportedSymlink(relative.to_path_buf()));
+    let to_metadata = fs::symlink_metadata(to).map_err(|e| DuetError::io(to, e))?;
+    let from_metadata = fs::symlink_metadata(from).map_err(|e| DuetError::io(from, e))?;
+    ensure_matches_checked_snapshot(relative, &from_metadata, expected)?;
+    progress(1, 1);
+    Ok(Some(CopiedMetadata {
+        from_size: from_metadata.len(),
+        from_mtime_ns: modified_ns(&from_metadata),
+        to_size: to_metadata.len(),
+        to_mtime_ns: modified_ns(&to_metadata),
+    }))
+}
+
 fn ensure_matches_checked_snapshot(
     relative: &Path,
     metadata: &fs::Metadata,
@@ -211,7 +263,7 @@ fn ensure_matches_checked_snapshot(
     let Some(expected) = expected else {
         return Ok(());
     };
-    if expected.kind != EntryKind::File
+    if !matches!(expected.kind, EntryKind::File | EntryKind::SymbolicLink)
         || expected.size != metadata.len()
         || expected.mtime_ns != modified_ns(metadata)
     {
@@ -252,8 +304,15 @@ fn delete_entry(root: &Path, relative: &Path, kind: EntryKind) -> Result<()> {
     let Ok(metadata) = fs::symlink_metadata(&path) else {
         return Ok(());
     };
+    if kind == EntryKind::SymbolicLink {
+        if !metadata.file_type().is_symlink() {
+            return Err(changed_after_check(relative));
+        }
+        checked_parent(root, &path)?;
+        return fs::remove_file(&path).map_err(|e| DuetError::io(&path, e));
+    }
     if metadata.file_type().is_symlink() {
-        return Err(DuetError::UnsupportedSymlink(relative.to_path_buf()));
+        return Err(changed_after_check(relative));
     }
     let actual = path.canonicalize().map_err(|e| DuetError::io(&path, e))?;
     let root = root.canonicalize().map_err(|e| DuetError::io(root, e))?;
@@ -280,6 +339,21 @@ fn checked_existing(root: &Path, relative: &Path) -> Result<PathBuf> {
         return Err(DuetError::UnsafePath(relative.to_path_buf()));
     }
     Ok(actual)
+}
+
+fn checked_symbolic_link(root: &Path, relative: &Path) -> Result<PathBuf> {
+    let path = lexical_join(root, relative)?;
+    let root_actual = root.canonicalize().map_err(|e| DuetError::io(root, e))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| DuetError::UnsafePath(path.clone()))?;
+    let parent_actual = parent
+        .canonicalize()
+        .map_err(|e| DuetError::io(parent, e))?;
+    if !parent_actual.starts_with(&root_actual) {
+        return Err(DuetError::UnsafePath(relative.to_path_buf()));
+    }
+    Ok(path)
 }
 
 fn checked_destination(root: &Path, relative: &Path) -> Result<PathBuf> {
