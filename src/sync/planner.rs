@@ -24,12 +24,9 @@ pub fn build_plan(
         let previous = baseline.get(&path);
         let source_now = plan.source_snapshots.get(&path);
         let duet_now = plan.duet_snapshots.get(&path);
-        let source_state = change_state(previous, source_now);
-        let duet_state = change_state(previous, duet_now);
-        let equal_now = source_now.is_some()
-            && duet_now.is_some()
-            && source_now.map(|s| (&s.kind, &s.hash)) == duet_now.map(|s| (&s.kind, &s.hash));
-        let action = decide(source_state, duet_state, equal_now);
+        let source_state = change_state(previous, source_now, BaselineSide::Source);
+        let duet_state = change_state(previous, duet_now, BaselineSide::Target);
+        let action = decide(source_state, duet_state);
         let kind = source_now
             .map(|s| s.kind)
             .or_else(|| duet_now.map(|s| s.kind))
@@ -55,13 +52,30 @@ pub fn build_plan(
     plan
 }
 
-fn change_state(previous: Option<&BaselineEntry>, current: Option<&FileSnapshot>) -> ChangeState {
+#[derive(Clone, Copy)]
+enum BaselineSide {
+    Source,
+    Target,
+}
+
+fn change_state(
+    previous: Option<&BaselineEntry>,
+    current: Option<&FileSnapshot>,
+    side: BaselineSide,
+) -> ChangeState {
     match (previous, current) {
         (None, None) => ChangeState::Missing,
         (None, Some(_)) => ChangeState::Created,
         (Some(_), None) => ChangeState::Deleted,
         (Some(previous), Some(current)) => {
-            if previous.kind == current.kind && previous.baseline_hash == current.hash {
+            let (size, mtime_ns) = match side {
+                BaselineSide::Source => (previous.source_size, previous.source_mtime_ns),
+                BaselineSide::Target => (previous.duet_size, previous.duet_mtime_ns),
+            };
+            if previous.kind == current.kind
+                && (current.kind == crate::EntryKind::Directory
+                    || (size == Some(current.size) && mtime_ns == Some(current.mtime_ns)))
+            {
                 ChangeState::Unchanged
             } else {
                 ChangeState::Modified
@@ -70,11 +84,8 @@ fn change_state(previous: Option<&BaselineEntry>, current: Option<&FileSnapshot>
     }
 }
 
-pub fn decide(source: ChangeState, duet: ChangeState, equal_now: bool) -> SyncAction {
+pub fn decide(source: ChangeState, duet: ChangeState) -> SyncAction {
     use ChangeState::*;
-    if equal_now && matches!((source, duet), (Modified, Modified) | (Created, Created)) {
-        return SyncAction::Adopt;
-    }
     match (source, duet) {
         (Unchanged, Unchanged) => SyncAction::None,
         (Modified, Unchanged) => SyncAction::SourceToDuet,
@@ -96,27 +107,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compares_each_file_against_its_side_specific_metadata() {
+        let previous = BaselineEntry {
+            relative_path: PathBuf::from("document.txt"),
+            kind: crate::EntryKind::File,
+            source_size: Some(10),
+            source_mtime_ns: Some(100),
+            duet_size: Some(10),
+            duet_mtime_ns: Some(200),
+        };
+        let source = FileSnapshot {
+            relative_path: PathBuf::from("document.txt"),
+            kind: crate::EntryKind::File,
+            size: 10,
+            mtime_ns: 100,
+        };
+        let target = FileSnapshot {
+            relative_path: PathBuf::from("document.txt"),
+            kind: crate::EntryKind::File,
+            size: 10,
+            mtime_ns: 201,
+        };
+
+        assert_eq!(
+            change_state(Some(&previous), Some(&source), BaselineSide::Source),
+            ChangeState::Unchanged
+        );
+        assert_eq!(
+            change_state(Some(&previous), Some(&target), BaselineSide::Target),
+            ChangeState::Modified
+        );
+    }
+
+    #[test]
     fn implements_the_decision_matrix() {
         use ChangeState::*;
         use SyncAction::*;
         let cases = [
-            (Unchanged, Unchanged, false, None),
-            (Modified, Unchanged, false, SourceToDuet),
-            (Unchanged, Modified, false, DuetToSource),
-            (Modified, Modified, false, Conflict),
-            (Modified, Modified, true, Adopt),
-            (Deleted, Unchanged, false, DeleteDuet),
-            (Unchanged, Deleted, false, DeleteSource),
-            (Deleted, Modified, false, Conflict),
-            (Modified, Deleted, false, Conflict),
-            (Deleted, Deleted, false, RemoveBaseline),
-            (Created, Missing, false, SourceToDuet),
-            (Missing, Created, false, DuetToSource),
-            (Created, Created, true, Adopt),
-            (Created, Created, false, Conflict),
+            (Unchanged, Unchanged, None),
+            (Modified, Unchanged, SourceToDuet),
+            (Unchanged, Modified, DuetToSource),
+            (Modified, Modified, Conflict),
+            (Deleted, Unchanged, DeleteDuet),
+            (Unchanged, Deleted, DeleteSource),
+            (Deleted, Modified, Conflict),
+            (Modified, Deleted, Conflict),
+            (Deleted, Deleted, RemoveBaseline),
+            (Created, Missing, SourceToDuet),
+            (Missing, Created, DuetToSource),
+            (Created, Created, Conflict),
         ];
-        for (source, duet, equal, expected) in cases {
-            assert_eq!(decide(source, duet, equal), expected);
+        for (source, duet, expected) in cases {
+            assert_eq!(decide(source, duet), expected);
         }
     }
 }

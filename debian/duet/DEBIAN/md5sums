@@ -1,0 +1,7 @@
+321eb9683f4e86d81d843b60463e3697  usr/bin/duet
+1aeba1d17a9fe5e33f1d7006ff8a6497  usr/share/applications/io.github.rtomasa.Duet.desktop
+8c768cbb7823b0b89bc81121bcf1dba2  usr/share/doc/duet/changelog.Debian.gz
+8f179f84baa7ed42e6c90d2cb1f928eb  usr/share/doc/duet/copyright
+936dde0fd625bc4e2fee1535b4e90d31  usr/share/glib-2.0/schemas/io.github.rtomasa.Duet.gschema.xml
+0a6f62224925f1b95d8cbdc55542f7d7  usr/share/icons/hicolor/scalable/apps/io.github.rtomasa.Duet.svg
+9cd13554a32a8fa055c49e9cfbe8d066  usr/share/metainfo/io.github.rtomasa.Duet.metainfo.xml

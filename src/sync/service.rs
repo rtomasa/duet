@@ -7,8 +7,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use super::scanner::ScanMode;
-
 pub struct DuetService {
     pub duet_root: PathBuf,
     pub manifest: DuetManifest,
@@ -64,13 +62,12 @@ impl DuetService {
         Ok(())
     }
 
-    pub fn compare(&self, mode: ScanMode) -> Result<SyncPlan> {
-        self.compare_with_progress_and_cancel(mode, |_, _| {}, || false)
+    pub fn compare(&self) -> Result<SyncPlan> {
+        self.compare_with_progress_and_cancel(|_, _| {}, || false)
     }
 
     pub fn compare_with_progress_and_cancel<F, C>(
         &self,
-        mode: ScanMode,
         progress: F,
         is_cancelled: C,
     ) -> Result<SyncPlan>
@@ -81,20 +78,11 @@ impl DuetService {
         let baseline = self.database.entries()?;
         let source = scanner::scan_with_progress_and_cancel(
             &self.manifest.source.last_known_path,
-            scanner::ScanSide::Source,
-            &baseline,
-            mode,
             &progress,
             &is_cancelled,
         )?;
-        let duet = scanner::scan_with_progress_and_cancel(
-            &self.duet_root,
-            scanner::ScanSide::Duet,
-            &baseline,
-            mode,
-            &progress,
-            &is_cancelled,
-        )?;
+        let duet =
+            scanner::scan_with_progress_and_cancel(&self.duet_root, &progress, &is_cancelled)?;
         Ok(planner::build_plan(&baseline, source, duet))
     }
 
@@ -178,7 +166,7 @@ impl DuetService {
                     return Err(error);
                 }
             };
-            match baseline_change(plan, operation, copied) {
+            match baseline_change(operation, copied) {
                 Ok(Some(entry)) => updated_entries.push(entry),
                 Ok(None) => removed_paths.push(operation.relative_path.clone()),
                 Err(error) => {
@@ -235,7 +223,6 @@ fn checked_origin_snapshot<'a>(
 }
 
 fn baseline_change(
-    plan: &SyncPlan,
     operation: &PlannedOperation,
     copied: Option<executor::CopiedMetadata>,
 ) -> Result<Option<BaselineEntry>> {
@@ -267,36 +254,10 @@ fn baseline_change(
             BaselineEntry {
                 relative_path: path.clone(),
                 kind: operation.kind,
-                baseline_hash: copied.hash,
                 source_size: Some(source_size),
                 source_mtime_ns: Some(source_mtime_ns),
                 duet_size: Some(duet_size),
                 duet_mtime_ns: Some(duet_mtime_ns),
-            }
-        }
-        SyncAction::Adopt => {
-            let source = plan.source_snapshots.get(path);
-            let duet = plan.duet_snapshots.get(path);
-            let (Some(source), Some(duet)) = (source, duet) else {
-                return Err(DuetError::Other(anyhow::anyhow!(
-                    "The copies of {} are no longer available",
-                    path.display()
-                )));
-            };
-            if source.kind != duet.kind || source.hash != duet.hash {
-                return Err(DuetError::Other(anyhow::anyhow!(
-                    "The checked copies of {} are not equivalent",
-                    path.display()
-                )));
-            }
-            BaselineEntry {
-                relative_path: path.clone(),
-                kind: source.kind,
-                baseline_hash: source.hash.clone(),
-                source_size: Some(source.size),
-                source_mtime_ns: Some(source.mtime_ns),
-                duet_size: Some(duet.size),
-                duet_mtime_ns: Some(duet.mtime_ns),
             }
         }
         SyncAction::DeleteSource | SyncAction::DeleteDuet | SyncAction::RemoveBaseline => {
@@ -398,7 +359,7 @@ mod tests {
         fs::create_dir_all(source.join("empty")).unwrap();
         write(&source.join("docs/note.txt"), "hello");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         assert_eq!(plan.conflicts.len(), 0);
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(
@@ -417,7 +378,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         write(&source.join("progress.txt"), "progress");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         let mut events = Vec::new();
 
         service
@@ -459,7 +420,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("large.bin"), vec![7_u8; 3 * 1024 * 1024]).unwrap();
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         let cancelled = Cell::new(false);
 
         let result = service.synchronize_with_progress_and_cancel(
@@ -478,30 +439,6 @@ mod tests {
     }
 
     #[test]
-    fn synchronization_rejects_content_changed_after_check_even_with_same_metadata() {
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("source");
-        let duet = temp.path().join("portable");
-        fs::create_dir_all(&source).unwrap();
-        let path = source.join("changed.bin");
-        fs::write(&path, b"original").unwrap();
-        let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
-        let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let plan = service.compare(ScanMode::Verified).unwrap();
-
-        // Keep both size and modification time unchanged so the streaming hash,
-        // rather than metadata alone, has to catch the stale plan.
-        fs::write(&path, b"tampered").unwrap();
-        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(original_mtime))
-            .unwrap();
-
-        let result = service.synchronize(&plan, &BTreeMap::new());
-
-        assert!(result.is_err());
-        assert!(!duet.join("changed.bin").exists());
-    }
-
-    #[test]
     fn empty_file_copy_reports_determinate_completion() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
@@ -509,7 +446,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("empty.bin"), []).unwrap();
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         let mut events = Vec::new();
 
         service
@@ -539,12 +476,12 @@ mod tests {
         write(&source.join("a.txt"), "base");
         write(&source.join("b.txt"), "base");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
 
         write(&source.join("a.txt"), "source edit");
         write(&duet.join("b.txt"), "portable edit");
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(
             fs::read_to_string(duet.join("a.txt")).unwrap(),
@@ -557,7 +494,7 @@ mod tests {
 
         write(&source.join("a.txt"), "left");
         write(&duet.join("a.txt"), "right");
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         assert_eq!(plan.conflicts.len(), 1);
         let outcome = service.synchronize(&plan, &BTreeMap::new()).unwrap();
         assert_eq!(outcome.skipped_conflicts, 1);
@@ -573,10 +510,10 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         write(&source.join("remove.txt"), "data");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let first = service.compare(ScanMode::Verified).unwrap();
+        let first = service.compare().unwrap();
         service.synchronize(&first, &BTreeMap::new()).unwrap();
         fs::remove_file(source.join("remove.txt")).unwrap();
-        let second = service.compare(ScanMode::Verified).unwrap();
+        let second = service.compare().unwrap();
         assert!(second.has_deletions());
         service.synchronize(&second, &BTreeMap::new()).unwrap();
         assert!(!duet.join("remove.txt").exists());
@@ -590,12 +527,12 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         write(&source.join("conflict.txt"), "base");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let first = service.compare(ScanMode::Verified).unwrap();
+        let first = service.compare().unwrap();
         service.synchronize(&first, &BTreeMap::new()).unwrap();
         write(&source.join("conflict.txt"), "source wins");
         write(&duet.join("conflict.txt"), "portable loses");
 
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         let mut resolutions = BTreeMap::new();
         resolutions.insert(
             PathBuf::from("conflict.txt"),
@@ -606,7 +543,7 @@ mod tests {
             fs::read_to_string(duet.join("conflict.txt")).unwrap(),
             "source wins"
         );
-        let settled = service.compare(ScanMode::Verified).unwrap();
+        let settled = service.compare().unwrap();
         assert_eq!(settled.actionable_count(), 0);
         assert!(settled.conflicts.is_empty());
     }
@@ -619,12 +556,12 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         write(&source.join("choice.txt"), "base");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let first = service.compare(ScanMode::Verified).unwrap();
+        let first = service.compare().unwrap();
         service.synchronize(&first, &BTreeMap::new()).unwrap();
         fs::remove_file(source.join("choice.txt")).unwrap();
         write(&duet.join("choice.txt"), "edited while away");
 
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         assert_eq!(plan.conflicts.len(), 1);
         let mut resolutions = BTreeMap::new();
         resolutions.insert(
@@ -633,11 +570,7 @@ mod tests {
         );
         service.synchronize(&plan, &resolutions).unwrap();
         assert!(!duet.join("choice.txt").exists());
-        assert!(service
-            .compare(ScanMode::Verified)
-            .unwrap()
-            .conflicts
-            .is_empty());
+        assert!(service.compare().unwrap().conflicts.is_empty());
     }
 
     #[test]
@@ -673,7 +606,7 @@ mod tests {
             let duet = temp.path().join("portable");
             let service = DuetService::create(&source, &duet, "Test").unwrap();
             assert!(matches!(
-                service.compare(ScanMode::Verified),
+                service.compare(),
                 Err(DuetError::UnsupportedSymlink(_))
             ));
         }
@@ -688,11 +621,11 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         write(&source.join("changed.txt"), "before");
         let service = DuetService::create(&source, &duet, "Test").unwrap();
-        let initial = service.compare(ScanMode::Verified).unwrap();
+        let initial = service.compare().unwrap();
         service.synchronize(&initial, &BTreeMap::new()).unwrap();
 
         write(&source.join("changed.txt"), "after");
-        let plan = service.compare(ScanMode::Verified).unwrap();
+        let plan = service.compare().unwrap();
         std::os::unix::fs::symlink("/tmp", source.join("appeared-after-check")).unwrap();
 
         service.synchronize(&plan, &BTreeMap::new()).unwrap();

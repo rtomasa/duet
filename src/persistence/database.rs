@@ -28,7 +28,6 @@ impl Database {
              CREATE TABLE IF NOT EXISTS entries (
                 relative_path TEXT PRIMARY KEY,
                 entry_type TEXT NOT NULL,
-                baseline_hash TEXT,
                 source_size INTEGER,
                 source_mtime_ns INTEGER,
                 duet_size INTEGER,
@@ -57,7 +56,7 @@ impl Database {
 
     pub fn entries(&self) -> Result<BTreeMap<PathBuf, BaselineEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT relative_path, entry_type, baseline_hash,
+            "SELECT relative_path, entry_type,
                     source_size, source_mtime_ns, duet_size, duet_mtime_ns
              FROM entries ORDER BY relative_path",
         )?;
@@ -71,11 +70,10 @@ impl Database {
                 } else {
                     EntryKind::File
                 },
-                baseline_hash: row.get(2)?,
-                source_size: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
-                source_mtime_ns: row.get(4)?,
-                duet_size: row.get::<_, Option<i64>>(5)?.map(|v| v as u64),
-                duet_mtime_ns: row.get(6)?,
+                source_size: row.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                source_mtime_ns: row.get(3)?,
+                duet_size: row.get::<_, Option<i64>>(4)?.map(|v| v as u64),
+                duet_mtime_ns: row.get(5)?,
             })
         })?;
         let mut result = BTreeMap::new();
@@ -151,12 +149,11 @@ impl Database {
         for entry in entries {
             tx.execute(
                 "INSERT INTO entries (
-                    relative_path, entry_type, baseline_hash,
+                    relative_path, entry_type,
                     source_size, source_mtime_ns, duet_size, duet_mtime_ns, last_sync_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(relative_path) DO UPDATE SET
                     entry_type=excluded.entry_type,
-                    baseline_hash=excluded.baseline_hash,
                     source_size=excluded.source_size,
                     source_mtime_ns=excluded.source_mtime_ns,
                     duet_size=excluded.duet_size,
@@ -168,7 +165,6 @@ impl Database {
                         EntryKind::File => "file",
                         EntryKind::Directory => "directory",
                     },
-                    entry.baseline_hash,
                     entry.source_size.map(|value| value as i64),
                     entry.source_mtime_ns,
                     entry.duet_size.map(|value| value as i64),
@@ -217,12 +213,11 @@ impl Database {
     pub fn upsert_entry(&self, entry: &BaselineEntry) -> Result<()> {
         self.conn.execute(
             "INSERT INTO entries (
-                relative_path, entry_type, baseline_hash,
+                relative_path, entry_type,
                 source_size, source_mtime_ns, duet_size, duet_mtime_ns, last_sync_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(relative_path) DO UPDATE SET
                 entry_type=excluded.entry_type,
-                baseline_hash=excluded.baseline_hash,
                 source_size=excluded.source_size,
                 source_mtime_ns=excluded.source_mtime_ns,
                 duet_size=excluded.duet_size,
@@ -234,7 +229,6 @@ impl Database {
                     EntryKind::File => "file",
                     EntryKind::Directory => "directory",
                 },
-                entry.baseline_hash,
                 entry.source_size.map(|v| v as i64),
                 entry.source_mtime_ns,
                 entry.duet_size.map(|v| v as i64),

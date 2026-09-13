@@ -31,14 +31,12 @@ pub struct FileSnapshot {
     pub kind: EntryKind,
     pub size: u64,
     pub mtime_ns: i64,
-    pub hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaselineEntry {
     pub relative_path: PathBuf,
     pub kind: EntryKind,
-    pub baseline_hash: Option<String>,
     pub source_size: Option<u64>,
     pub source_mtime_ns: Option<i64>,
     pub duet_size: Option<u64>,
@@ -63,7 +61,6 @@ pub enum SyncAction {
     DeleteSource,
     DeleteDuet,
     RemoveBaseline,
-    Adopt,
     Conflict,
 }
 

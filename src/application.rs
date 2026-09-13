@@ -1,7 +1,6 @@
 use adw::prelude::*;
 use duet::{
-    ConflictResolution, DuetError, DuetService, EntryKind, PlannedOperation, ScanMode, SyncAction,
-    SyncPlan,
+    ConflictResolution, DuetError, DuetService, EntryKind, PlannedOperation, SyncAction, SyncPlan,
 };
 use gtk::{gio, glib};
 use std::cell::RefCell;
@@ -35,6 +34,8 @@ struct UiState {
     resolutions: BTreeMap<PathBuf, ConflictResolution>,
 }
 
+type ActiveOperations = Rc<RefCell<BTreeMap<PathBuf, adw::NavigationPage>>>;
+
 pub fn run() -> glib::ExitCode {
     let app = adw::Application::builder().application_id(APP_ID).build();
     install_actions(&app);
@@ -51,8 +52,14 @@ fn build_window(app: &adw::Application) {
         .build();
     let toast_overlay = adw::ToastOverlay::new();
     let navigation = adw::NavigationView::new();
+    let active_operations = ActiveOperations::default();
     toast_overlay.set_child(Some(&navigation));
-    navigation.add(&home_page(&window, &navigation, &toast_overlay));
+    navigation.add(&home_page(
+        &window,
+        &navigation,
+        &toast_overlay,
+        &active_operations,
+    ));
     window.set_content(Some(&toast_overlay));
     window.present();
 }
@@ -61,6 +68,7 @@ fn home_page(
     window: &adw::ApplicationWindow,
     navigation: &adw::NavigationView,
     toasts: &adw::ToastOverlay,
+    active_operations: &ActiveOperations,
 ) -> adw::NavigationPage {
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header_bar());
@@ -81,23 +89,32 @@ fn home_page(
     actions.set_halign(gtk::Align::Center);
     let create = gtk::Button::with_mnemonic(&english("_Create Duet"));
     create.add_css_class("suggested-action");
-    create.set_tooltip_text(Some(&english("Choose a source and a portable destination")));
+    create.set_tooltip_text(Some(&english(
+        "Choose a Source and a portable Target location",
+    )));
     let open = gtk::Button::with_mnemonic(&english("_Open Duet"));
-    open.set_tooltip_text(Some(&english("Open an existing Duet folder")));
+    open.set_tooltip_text(Some(&english("Open an existing Target folder")));
     actions.append(&create);
     actions.append(&open);
     status.set_child(Some(&actions));
     content.append(&status);
 
     let group = adw::PreferencesGroup::builder()
-        .title(&english("Your Duets"))
+        .title(&english("Your Targets"))
         .description(&english(
-            "Duets stay listed even when a removable drive is disconnected",
+            "Targets stay listed even when a removable drive is disconnected",
         ))
         .build();
     content.append(&group);
     let known_rows = Rc::new(RefCell::new(Vec::new()));
-    populate_known_duets(&group, &known_rows, window, navigation, toasts);
+    populate_known_duets(
+        &group,
+        &known_rows,
+        window,
+        navigation,
+        toasts,
+        active_operations,
+    );
     let settings = settings();
     let settings_lifetime = settings.clone();
     let group_copy = group.clone();
@@ -105,19 +122,22 @@ fn home_page(
     let win = window.clone();
     let nav = navigation.clone();
     let overlay = toasts.clone();
-    settings.connect_changed(Some("known-duets"), move |_, _| {
+    let active = active_operations.clone();
+    settings.connect_changed(Some("known-targets"), move |_, _| {
         let _keep_alive = &settings_lifetime;
-        populate_known_duets(&group_copy, &rows_copy, &win, &nav, &overlay);
+        populate_known_duets(&group_copy, &rows_copy, &win, &nav, &overlay, &active);
     });
 
     let nav = navigation.clone();
     let win = window.clone();
     let overlay = toasts.clone();
-    open.connect_clicked(move |_| choose_existing(&win, &nav, &overlay));
+    let active = active_operations.clone();
+    open.connect_clicked(move |_| choose_existing(&win, &nav, &overlay, &active));
     let nav = navigation.clone();
     let win = window.clone();
     let overlay = toasts.clone();
-    create.connect_clicked(move |_| choose_source(&win, &nav, &overlay));
+    let active = active_operations.clone();
+    create.connect_clicked(move |_| choose_source(&win, &nav, &overlay, &active));
 
     toolbar.set_content(Some(&content));
     adw::NavigationPage::builder()
@@ -132,12 +152,13 @@ fn populate_known_duets(
     window: &adw::ApplicationWindow,
     navigation: &adw::NavigationView,
     toasts: &adw::ToastOverlay,
+    active_operations: &ActiveOperations,
 ) {
     for row in rows.borrow_mut().drain(..) {
         group.remove(&row);
     }
 
-    for item in settings().strv("known-duets") {
+    for item in settings().strv("known-targets") {
         let root = PathBuf::from(item.as_str());
         let available = root.is_dir();
         let service = available.then(|| DuetService::open(&root).ok()).flatten();
@@ -149,7 +170,7 @@ fn populate_known_duets(
                     .and_then(|name| name.to_str())
                     .map(ToOwned::to_owned)
             })
-            .unwrap_or_else(|| english("Duet"));
+            .unwrap_or_else(|| english("Target"));
         let subtitle = if available {
             root.to_string_lossy().to_string()
         } else {
@@ -184,9 +205,10 @@ fn populate_known_duets(
         let nav = navigation.clone();
         let win = window.clone();
         let overlay = toasts.clone();
+        let active = active_operations.clone();
         row.connect_activated(move |_| {
             if root.is_dir() {
-                open_duet(&win, &nav, &overlay, root.clone());
+                open_duet(&win, &nav, &overlay, &active, root.clone());
             } else {
                 confirm_remove_unavailable(&win, root.clone());
             }
@@ -201,7 +223,7 @@ fn confirm_remove_unavailable(window: &adw::ApplicationWindow, root: PathBuf) {
         "The folder {path} is not available. It may be on a disconnected drive. Do you want to remove it from the list?",
     )
     .replace("{path}", &root.to_string_lossy());
-    let dialog = adw::AlertDialog::new(Some(&english("Duet unavailable")), Some(&message));
+    let dialog = adw::AlertDialog::new(Some(&english("Target unavailable")), Some(&message));
     dialog.add_responses(&[
         ("keep", &english("Keep")),
         ("remove", &english("Remove from List")),
@@ -220,18 +242,20 @@ fn choose_existing(
     window: &adw::ApplicationWindow,
     navigation: &adw::NavigationView,
     toasts: &adw::ToastOverlay,
+    active_operations: &ActiveOperations,
 ) {
     let dialog = gtk::FileDialog::builder()
-        .title(&english("Open Duet"))
+        .title(&english("Open Target"))
         .modal(true)
         .build();
     let window = window.clone();
     let navigation = navigation.clone();
     let toasts = toasts.clone();
+    let active_operations = active_operations.clone();
     glib::spawn_future_local(async move {
         if let Ok(folder) = dialog.select_folder_future(Some(&window)).await {
             if let Some(path) = folder.path() {
-                open_duet(&window, &navigation, &toasts, path);
+                open_duet(&window, &navigation, &toasts, &active_operations, path);
             }
         }
     });
@@ -241,6 +265,7 @@ fn choose_source(
     window: &adw::ApplicationWindow,
     navigation: &adw::NavigationView,
     toasts: &adw::ToastOverlay,
+    active_operations: &ActiveOperations,
 ) {
     let dialog = gtk::FileDialog::builder()
         .title(&english("Select Source Folder"))
@@ -249,13 +274,14 @@ fn choose_source(
     let window = window.clone();
     let navigation = navigation.clone();
     let toasts = toasts.clone();
+    let active_operations = active_operations.clone();
     glib::spawn_future_local(async move {
         let Ok(folder) = dialog.select_folder_future(Some(&window)).await else {
             return;
         };
         let Some(source) = folder.path() else { return };
         let destination_dialog = gtk::FileDialog::builder()
-            .title(&english("Choose Duet Destination"))
+            .title(&english("Choose Target Location"))
             .modal(true)
             .build();
         let Ok(destination) = destination_dialog.select_folder_future(Some(&window)).await else {
@@ -267,7 +293,7 @@ fn choose_source(
         let name = source
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("Duet")
+            .unwrap_or("Target")
             .to_string();
         let root = destination_parent.join(&name);
         let source_for_task = source.clone();
@@ -278,7 +304,7 @@ fn choose_source(
         })
         .await;
         match result {
-            Ok(Ok(_)) => open_duet(&window, &navigation, &toasts, root),
+            Ok(Ok(_)) => open_duet(&window, &navigation, &toasts, &active_operations, root),
             Ok(Err(error)) => show_error(&toasts, &localized_error(&error)),
             Err(_) => show_error(
                 &toasts,
@@ -292,8 +318,13 @@ fn open_duet(
     window: &adw::ApplicationWindow,
     navigation: &adw::NavigationView,
     toasts: &adw::ToastOverlay,
+    active_operations: &ActiveOperations,
     root: PathBuf,
 ) {
+    if let Some(page) = active_operations.borrow().get(&root).cloned() {
+        navigation.push(&page);
+        return;
+    }
     let service = match DuetService::open(&root) {
         Ok(service) => service,
         Err(error) => {
@@ -340,7 +371,7 @@ fn open_duet(
     locations.add(&source_row);
     locations.add(
         &adw::ActionRow::builder()
-            .title(&english("Duet"))
+            .title(&english("Target"))
             .subtitle(service.duet_root.to_string_lossy())
             .build(),
     );
@@ -396,6 +427,8 @@ fn open_duet(
         stop_button: stop.clone(),
         cancellation: Rc::new(RefCell::new(None)),
         operation_rows: Rc::new(RefCell::new(BTreeMap::new())),
+        active_operations: active_operations.clone(),
+        page: page.clone(),
     };
     let c = components.clone();
     compare.connect_clicked(move |_| run_compare(c.clone()));
@@ -426,6 +459,8 @@ struct ViewComponents {
     stop_button: gtk::Button,
     cancellation: Rc<RefCell<Option<Arc<AtomicBool>>>>,
     operation_rows: Rc<RefCell<BTreeMap<PathBuf, OperationWidgets>>>,
+    active_operations: ActiveOperations,
+    page: adw::NavigationPage,
 }
 
 #[derive(Clone)]
@@ -449,6 +484,7 @@ struct ScanProgressEvent {
 }
 
 fn run_compare(view: ViewComponents) {
+    mark_operation_active(&view);
     finish_sync_controls(&view);
     view.summary.set_text(&english("Checking folders…"));
     view.check_progress.set_fraction(0.0);
@@ -459,19 +495,13 @@ fn run_compare(view: ViewComponents) {
     let Some(root) = view.state.borrow().duet_root.clone() else {
         return;
     };
-    let mode = if settings().string("change-detection-mode") == "verified" {
-        ScanMode::Verified
-    } else {
-        ScanMode::Fast
-    };
     let cancellation = Arc::new(AtomicBool::new(false));
     *view.cancellation.borrow_mut() = Some(cancellation.clone());
     view.stop_button.set_label(&english("Stop"));
     view.stop_button.set_sensitive(true);
     view.stop_button.set_visible(true);
-    // Keep only the newest scan update. Hashing can produce thousands of events
-    // per second on fast storage; draining an unbounded channel on GTK's main
-    // thread starves redraws and makes the compositor report us as hung.
+    // Keep only the newest scan update. Large folder trees can produce updates
+    // faster than the GTK main thread can redraw them.
     let progress_updates = Arc::new(Mutex::new(None::<ScanProgressEvent>));
     let updates_for_timer = progress_updates.clone();
     let progress_view = view.clone();
@@ -490,7 +520,6 @@ fn run_compare(view: ViewComponents) {
         let result = gio::spawn_blocking(move || {
             let service = DuetService::open(&root)?;
             service.compare_with_progress_and_cancel(
-                mode,
                 move |completed, total| {
                     if let Ok(mut latest) = updates_for_worker.lock() {
                         *latest = Some(ScanProgressEvent { completed, total });
@@ -519,7 +548,24 @@ fn run_compare(view: ViewComponents) {
                 );
             }
         }
+        clear_active_operation(&view);
     });
+}
+
+fn mark_operation_active(view: &ViewComponents) {
+    let Some(root) = view.state.borrow().duet_root.clone() else {
+        return;
+    };
+    view.active_operations
+        .borrow_mut()
+        .insert(root, view.page.clone());
+}
+
+fn clear_active_operation(view: &ViewComponents) {
+    let Some(root) = view.state.borrow().duet_root.clone() else {
+        return;
+    };
+    view.active_operations.borrow_mut().remove(&root);
 }
 
 fn request_stop(view: &ViewComponents) {
@@ -552,7 +598,7 @@ fn update_scan_progress(view: &ViewComponents, event: ScanProgressEvent) {
         return;
     }
     let fraction = (event.completed as f64 / event.total as f64).clamp(0.0, 1.0);
-    // A comparison scans Source and Duet in separate phases. Do not keep
+    // A comparison scans Source and Target in separate phases. Do not keep
     // the previous phase's fraction or the second folder appears stuck at 100%.
     view.check_progress.set_fraction(fraction);
     view.check_progress
@@ -652,15 +698,15 @@ fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWi
             &row,
             view,
             &conflict.operation.relative_path,
-            &english("Keep Duet"),
-            english("Will keep Duet"),
+            &english("Keep Target"),
+            english("Will keep Target"),
             ConflictResolution::KeepDuet,
         );
         add_open_button(
             &row,
             view.state.borrow().duet_root.as_deref(),
             &conflict.operation.relative_path,
-            &english("Open Duet Copy"),
+            &english("Open Target Copy"),
         );
     }
     if source_deleted || duet_deleted {
@@ -733,9 +779,19 @@ fn run_sync(view: ViewComponents) {
     let (Some(plan), Some(root)) = (plan, root) else {
         return;
     };
+    mark_operation_active(&view);
+    view.compare_button.set_sensitive(false);
+    view.sync_button.set_sensitive(false);
     glib::spawn_future_local(async move {
         if let Some(plan) = prepare_deletions(&view, plan).await {
             perform_sync(view, plan, root, resolutions);
+        } else {
+            finish_sync_controls(&view);
+            let plan = view.state.borrow().plan.clone();
+            if let Some(plan) = plan {
+                render_plan(&view, plan);
+            }
+            clear_active_operation(&view);
         }
     });
 }
@@ -783,7 +839,7 @@ async fn ask_deletion_action(
     let location = if operation.action == SyncAction::DeleteDuet {
         english("Source")
     } else {
-        english("Duet")
+        english("Target")
     };
     let message =
         english("{path} was deleted from {location}. Choose what to do with the remaining copy.")
@@ -902,6 +958,7 @@ fn perform_sync(
             Ok(Err(error)) => {
                 view.summary.set_text(&english("Synchronization failed"));
                 show_error(&view.toasts, &localized_error(&error));
+                clear_active_operation(&view);
             }
             Err(_) => {
                 view.summary.set_text(&english("Synchronization failed"));
@@ -909,6 +966,7 @@ fn perform_sync(
                     &view.toasts,
                     &english("The background operation stopped unexpectedly"),
                 );
+                clear_active_operation(&view);
             }
         }
     });
@@ -1026,12 +1084,11 @@ fn locate_source(view: ViewComponents, row: adw::ActionRow) {
 
 fn action_label(action: SyncAction) -> String {
     match action {
-        SyncAction::SourceToDuet => english("Changed in Source → Duet"),
-        SyncAction::DuetToSource => english("Changed in Duet → Source"),
-        SyncAction::DeleteSource => english("Deleted in Duet → delete from Source"),
-        SyncAction::DeleteDuet => english("Deleted in Source → delete from Duet"),
+        SyncAction::SourceToDuet => english("Changed in Source → Target"),
+        SyncAction::DuetToSource => english("Changed in Target → Source"),
+        SyncAction::DeleteSource => english("Deleted in Target → delete from Source"),
+        SyncAction::DeleteDuet => english("Deleted in Source → delete from Target"),
         SyncAction::RemoveBaseline => english("Deleted from both copies"),
-        SyncAction::Adopt => english("Equal content on both sides"),
         SyncAction::Conflict => english("Conflict"),
         SyncAction::None => english("Synchronized"),
     }
@@ -1044,7 +1101,7 @@ fn settings() -> gio::Settings {
 fn remember(root: &Path) {
     let settings = settings();
     let mut values: Vec<String> = settings
-        .strv("known-duets")
+        .strv("known-targets")
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -1053,20 +1110,20 @@ fn remember(root: &Path) {
         values.push(value);
     }
     let refs: Vec<&str> = values.iter().map(String::as_str).collect();
-    let _ = settings.set_strv("known-duets", refs);
+    let _ = settings.set_strv("known-targets", refs);
 }
 
 fn forget(root: &Path) {
     let settings = settings();
     let value = root.to_string_lossy();
     let values: Vec<String> = settings
-        .strv("known-duets")
+        .strv("known-targets")
         .iter()
         .filter(|item| item.as_str() != value)
         .map(|item| item.to_string())
         .collect();
     let refs: Vec<&str> = values.iter().map(String::as_str).collect();
-    let _ = settings.set_strv("known-duets", refs);
+    let _ = settings.set_strv("known-targets", refs);
 }
 
 fn header_bar() -> adw::HeaderBar {
@@ -1125,29 +1182,7 @@ fn install_actions(app: &adw::Application) {
                 };
                 let _ = settings_copy.set_string("deletion-action", value);
             });
-            let fast = english("Fast");
-            let verified = english("Verified");
-            let modes = gtk::StringList::new(&[&fast, &verified]);
-            let detection = adw::ComboRow::builder()
-                .title(&english("Change detection"))
-                .subtitle(&english("Verified mode hashes every file"))
-                .model(&modes)
-                .selected(if settings.string("change-detection-mode") == "verified" {
-                    1
-                } else {
-                    0
-                })
-                .build();
-            detection.connect_selected_notify(move |row| {
-                let value = if row.selected() == 1 {
-                    "verified"
-                } else {
-                    "fast"
-                };
-                let _ = settings.set_string("change-detection-mode", value);
-            });
             group.add(&deletion);
-            group.add(&detection);
             page.add(&group);
             dialog.add(&page);
             dialog.present(Some(&window));
@@ -1170,20 +1205,20 @@ fn install_actions(app: &adw::Application) {
             let guide = adw::PreferencesGroup::builder()
                 .title(&english("Quick Guide"))
                 .description(&english(
-                    "Duet synchronizes a Source folder with a portable Duet folder only when you ask it to.",
+                    "Duet synchronizes a Source folder with a portable Target folder only when you ask it to.",
                 ))
                 .build();
             add_help_row(
                 &guide,
                 "document-new-symbolic",
-                &english("Create a Duet"),
-                &english("Choose the Source first, then a destination such as a USB drive."),
+                &english("Create a Target"),
+                &english("Choose the Source first, then a Target location such as a USB drive."),
             );
             add_help_row(
                 &guide,
                 "document-open-symbolic",
-                &english("Open a Duet"),
-                &english("Open an existing Duet folder to add it to the home screen."),
+                &english("Open a Target"),
+                &english("Open an existing Target folder to add it to the home screen."),
             );
             add_help_row(
                 &guide,
@@ -1207,12 +1242,6 @@ fn install_actions(app: &adw::Application) {
                 "edit-delete-symbolic",
                 &english("When a file is deleted"),
                 &english("Ask what to do, skip it, restore the deleted file, or delete the other copy."),
-            );
-            add_help_row(
-                &options,
-                "system-search-symbolic",
-                &english("Change detection"),
-                &english("Fast mode uses saved file details; Verified mode hashes every file for greater certainty."),
             );
             page.add(&options);
             dialog.add(&page);
@@ -1260,14 +1289,14 @@ fn localized_error(error: &DuetError) -> String {
         DuetError::Io { path, source } => english("Could not access {path}: {error}")
             .replace("{path}", &path.to_string_lossy())
             .replace("{error}", &source.to_string()),
-        DuetError::InvalidDuet(path) => english("The folder is not a valid Duet: {path}")
+        DuetError::InvalidDuet(path) => english("The folder is not a valid Target: {path}")
             .replace("{path}", &path.to_string_lossy()),
         DuetError::DestinationNotEmpty(path) => {
-            english("The destination folder already exists and is not empty: {path}")
+            english("The Target folder already exists and is not empty: {path}")
                 .replace("{path}", &path.to_string_lossy())
         }
         DuetError::OverlappingRoots => {
-            english("The Source and Duet folders cannot contain one another")
+            english("The Source and Target folders cannot contain one another")
         }
         DuetError::UnsafePath(path) => {
             english("The path “{path}” does not remain inside the synchronized folder")
@@ -1277,7 +1306,7 @@ fn localized_error(error: &DuetError) -> String {
             english("Symbolic links are not supported yet: {path}")
                 .replace("{path}", &path.to_string_lossy())
         }
-        DuetError::AlreadyLocked => english("Another synchronization is modifying this Duet"),
+        DuetError::AlreadyLocked => english("Another synchronization is modifying this Target"),
         DuetError::Cancelled => english("Synchronization was stopped"),
         DuetError::SourceUnavailable(path) => {
             english("The Source is unavailable: {path}").replace("{path}", &path.to_string_lossy())
@@ -1289,7 +1318,7 @@ fn localized_error(error: &DuetError) -> String {
             english("Database error: {error}").replace("{error}", &source.to_string())
         }
         DuetError::Manifest(source) => {
-            english("Invalid Duet metadata: {error}").replace("{error}", &source.to_string())
+            english("Invalid Target metadata: {error}").replace("{error}", &source.to_string())
         }
         DuetError::Other(source) => source.to_string(),
     }

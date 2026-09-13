@@ -1,0 +1,12 @@
+Package: duet
+Version: 0.1.1-1
+Architecture: amd64
+Maintainer: Duet contributors <noreply@example.com>
+Installed-Size: 2467
+Depends: libadwaita-1-0 (>= 1.5), libc6 (>= 2.34), libgcc-s1 (>= 4.2), libglib2.0-0t64 (>= 2.54.0), libgtk-4-1 (>= 4.10), dconf-gsettings-backend | gsettings-backend
+Section: utils
+Priority: optional
+Homepage: https://github.com/rtomasa/duet
+Description: Simple bidirectional folder synchronization for GNOME
+ Duet synchronizes a source folder and a portable copy on demand,
+ with an understandable review and explicit conflict handling.

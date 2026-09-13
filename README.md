@@ -1,17 +1,16 @@
 # Duet
 
-Duet is a native GNOME application for explicit, local, bidirectional folder synchronization. It keeps all synchronization metadata in the portable copy and never writes markers into the Source folder.
+Duet is a native GNOME application for explicit, local, bidirectional folder synchronization. It keeps all synchronization metadata in the portable Target folder and never writes markers into the Source folder.
 
 ## What works
 
 - Create and reopen portable sync pairs.
-- Detect new, changed, deleted, and equal files with SHA-256 baselines.
+- Detect new, changed, and deleted files using size and modification-time baselines.
 - Copy in either direction using streamed temporary files and atomic replacement.
 - Synchronize empty directories and deletions.
 - Detect two-sided conflicts and leave them untouched until the user decides.
 - Reject overlapping roots, path traversal, and symbolic links.
 - Journal operations in SQLite and recover by rescanning after interruption.
-- Fast and verified comparison modes.
 - GTK 4/libadwaita interface plus GSettings, AppStream, desktop, and icon metadata.
 
 ## Build the synchronization core
@@ -40,7 +39,7 @@ GSETTINGS_SCHEMA_DIR=data cargo run --features gui
 
 ## Safety model
 
-A synchronization always starts from a fresh scan. The complete plan exists before any mutation. Conflicts default to Skip, and failed copies stop the transaction before later destructive operations. Duet does not merge content, pick the newest timestamp, follow symlinks, run a daemon, or contact a network service.
+A synchronization always starts from a fresh metadata scan. The complete plan exists before any mutation. Conflicts default to Skip, and failed copies stop the transaction before later destructive operations. Duet does not merge content, pick the newest timestamp, follow symlinks, run a daemon, or contact a network service. File changes that preserve both size and the filesystem-reported modification time may not be detected.
 
 ## Packaging
 

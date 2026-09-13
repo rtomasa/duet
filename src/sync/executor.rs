@@ -1,7 +1,6 @@
 use crate::{DuetError, EntryKind, FileSnapshot, PlannedOperation, Result, SyncAction};
 use filetime::FileTime;
 use fs2::FileExt;
-use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,7 +11,6 @@ pub struct MutationLock {
 
 #[derive(Debug, Clone)]
 pub struct CopiedMetadata {
-    pub hash: Option<String>,
     pub from_size: u64,
     pub from_mtime_ns: i64,
     pub to_size: u64,
@@ -110,7 +108,7 @@ pub fn apply_one_with_progress(
             }
             result.map(|()| None)
         }
-        SyncAction::None | SyncAction::Adopt | SyncAction::RemoveBaseline => {
+        SyncAction::None | SyncAction::RemoveBaseline => {
             progress(1, 1);
             Ok(None)
         }
@@ -136,7 +134,6 @@ fn copy_entry(
         let from_metadata = fs::metadata(&from).map_err(|e| DuetError::io(&from, e))?;
         let to_metadata = fs::metadata(&to).map_err(|e| DuetError::io(&to, e))?;
         return Ok(Some(CopiedMetadata {
-            hash: None,
             from_size: 0,
             from_mtime_ns: modified_ns(&from_metadata),
             to_size: 0,
@@ -168,7 +165,6 @@ fn copy_entry(
         .map_err(|e| DuetError::io(parent, e))?;
     let mut buffer = [0_u8; 1024 * 1024];
     let mut written = 0_u64;
-    let mut digest = Sha256::new();
     loop {
         check_cancelled(is_cancelled)?;
         let count = input
@@ -180,7 +176,6 @@ fn copy_entry(
         temporary
             .write_all(&buffer[..count])
             .map_err(|e| DuetError::io(&to, e))?;
-        digest.update(&buffer[..count]);
         written += count as u64;
         // Reserve 100% for the point at which the complete temporary file has
         // been flushed, persisted, and had its metadata applied.
@@ -200,12 +195,6 @@ fn copy_entry(
             relative.display()
         )));
     }
-    let hash = hex::encode(digest.finalize());
-    if let Some(expected_hash) = expected.and_then(|snapshot| snapshot.hash.as_deref()) {
-        if hash != expected_hash {
-            return Err(changed_after_check(relative));
-        }
-    }
     temporary
         .persist(&to)
         .map_err(|e| DuetError::io(&to, e.error))?;
@@ -224,7 +213,6 @@ fn copy_entry(
     }
     progress(progress_total, progress_total);
     Ok(Some(CopiedMetadata {
-        hash: Some(hash),
         from_size: from_metadata.len(),
         from_mtime_ns: modified_ns(&from_metadata),
         to_size: to_metadata.len(),

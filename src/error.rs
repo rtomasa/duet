@@ -8,17 +8,17 @@ pub enum DuetError {
         #[source]
         source: std::io::Error,
     },
-    #[error("The folder is not a valid Duet: {0}")]
+    #[error("The folder is not a valid Target: {0}")]
     InvalidDuet(PathBuf),
-    #[error("The destination folder already exists and is not empty: {0}")]
+    #[error("The Target folder already exists and is not empty: {0}")]
     DestinationNotEmpty(PathBuf),
-    #[error("The Source and Duet folders cannot contain one another")]
+    #[error("The Source and Target folders cannot contain one another")]
     OverlappingRoots,
     #[error("The path “{0}” does not remain inside the synchronized folder")]
     UnsafePath(PathBuf),
     #[error("Symbolic links are not supported yet: {0}")]
     UnsupportedSymlink(PathBuf),
-    #[error("Another synchronization is modifying this Duet")]
+    #[error("Another synchronization is modifying this Target")]
     AlreadyLocked,
     #[error("Synchronization was stopped")]
     Cancelled,
@@ -28,7 +28,7 @@ pub enum DuetError {
     UnresolvedConflict(PathBuf),
     #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
-    #[error("Invalid Duet metadata: {0}")]
+    #[error("Invalid Target metadata: {0}")]
     Manifest(#[from] serde_json::Error),
     #[error("{0}")]
     Other(#[from] anyhow::Error),
