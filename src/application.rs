@@ -439,6 +439,8 @@ struct SyncProgressEvent {
     completed: u64,
     total: u64,
     finished: bool,
+    copied_files: usize,
+    total_files: usize,
 }
 
 struct ScanProgressEvent {
@@ -824,7 +826,8 @@ fn perform_sync(
     root: PathBuf,
     resolutions: BTreeMap<PathBuf, ConflictResolution>,
 ) {
-    view.summary.set_text(&english("Synchronizing…"));
+    let total_files = synchronization_file_count(&plan, &resolutions);
+    view.summary.set_text(&sync_progress_label(0, total_files));
     view.compare_button.set_sensitive(false);
     view.sync_button.set_sensitive(false);
     view.stop_button.set_label(&english("Stop"));
@@ -850,12 +853,16 @@ fn perform_sync(
     });
     glib::spawn_future_local(async move {
         let updates_for_worker = progress_updates.clone();
+        let mut copied_files = 0;
         let result = gio::spawn_blocking(move || {
             let service = DuetService::open(&root)?;
             service.synchronize_with_progress_and_cancel(
                 &plan,
                 &resolutions,
                 move |operation, completed, total, finished| {
+                    if finished && operation.kind == EntryKind::File {
+                        copied_files += 1;
+                    }
                     if let Ok(mut updates) = updates_for_worker.lock() {
                         updates.insert(
                             operation.relative_path.clone(),
@@ -864,6 +871,8 @@ fn perform_sync(
                                 completed,
                                 total,
                                 finished,
+                                copied_files,
+                                total_files,
                             },
                         );
                     }
@@ -905,7 +914,57 @@ fn perform_sync(
     });
 }
 
+fn sync_progress_label(copied_files: usize, total_files: usize) -> String {
+    format!(
+        "{} {}/{}",
+        english("Synchronizing"),
+        copied_files,
+        total_files
+    )
+}
+
+fn synchronization_file_count(
+    plan: &SyncPlan,
+    resolutions: &BTreeMap<PathBuf, ConflictResolution>,
+) -> usize {
+    let regular_files = plan
+        .operations
+        .iter()
+        .filter(|operation| {
+            operation.action != SyncAction::None && operation.kind == EntryKind::File
+        })
+        .count();
+    let resolved_conflict_files = plan
+        .conflicts
+        .iter()
+        .filter_map(|conflict| {
+            let resolution = resolutions
+                .get(&conflict.operation.relative_path)
+                .copied()
+                .unwrap_or(ConflictResolution::Skip);
+            let kind = match resolution {
+                ConflictResolution::KeepSource => conflict.source.as_ref()?.kind,
+                ConflictResolution::KeepDuet => conflict.duet.as_ref()?.kind,
+                ConflictResolution::AcceptDeletion => {
+                    if conflict.operation.source_state == duet::ChangeState::Deleted {
+                        conflict.duet.as_ref()?.kind
+                    } else if conflict.operation.duet_state == duet::ChangeState::Deleted {
+                        conflict.source.as_ref()?.kind
+                    } else {
+                        return None;
+                    }
+                }
+                ConflictResolution::Skip => return None,
+            };
+            (kind == EntryKind::File).then_some(())
+        })
+        .count();
+    regular_files + resolved_conflict_files
+}
+
 fn update_operation_progress(view: &ViewComponents, event: SyncProgressEvent) {
+    view.summary
+        .set_text(&sync_progress_label(event.copied_files, event.total_files));
     let widgets = view.operation_rows.borrow().get(&event.path).cloned();
     let Some(widgets) = widgets else { return };
     if event.finished {
