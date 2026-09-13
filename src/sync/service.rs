@@ -63,11 +63,12 @@ impl DuetService {
     }
 
     pub fn compare(&self) -> Result<SyncPlan> {
-        self.compare_with_progress_and_cancel(|_, _| {}, || false)
+        self.compare_with_progress_and_cancel(false, |_, _| {}, || false)
     }
 
     pub fn compare_with_progress_and_cancel<F, C>(
         &self,
+        skip_hidden_files: bool,
         progress: F,
         is_cancelled: C,
     ) -> Result<SyncPlan>
@@ -75,14 +76,22 @@ impl DuetService {
         F: Fn(u64, u64) + Sync,
         C: Fn() -> bool + Sync,
     {
-        let baseline = self.database.entries()?;
+        let mut baseline = self.database.entries()?;
+        if skip_hidden_files {
+            baseline.retain(|path, _| !scanner::is_hidden_path(path));
+        }
         let source = scanner::scan_with_progress_and_cancel(
             &self.manifest.source.last_known_path,
+            skip_hidden_files,
             &progress,
             &is_cancelled,
         )?;
-        let duet =
-            scanner::scan_with_progress_and_cancel(&self.duet_root, &progress, &is_cancelled)?;
+        let duet = scanner::scan_with_progress_and_cancel(
+            &self.duet_root,
+            skip_hidden_files,
+            &progress,
+            &is_cancelled,
+        )?;
         Ok(planner::build_plan(&baseline, source, duet))
     }
 
@@ -391,6 +400,29 @@ mod tests {
         );
         assert!(duet.join("empty").is_dir());
         assert!(!source.join(".duet").exists());
+    }
+
+    #[test]
+    fn skipping_hidden_files_leaves_previously_synced_hidden_files_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let duet = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        write(&source.join("visible.txt"), "visible");
+        write(&source.join(".hidden.txt"), "hidden");
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
+        let plan = service.compare().unwrap();
+        service.synchronize(&plan, &BTreeMap::new()).unwrap();
+
+        let plan = service
+            .compare_with_progress_and_cancel(true, |_, _| {}, || false)
+            .unwrap();
+
+        assert!(!plan
+            .operations
+            .iter()
+            .any(|operation| operation.relative_path == Path::new(".hidden.txt")));
+        assert!(duet.join(".hidden.txt").is_file());
     }
 
     #[test]

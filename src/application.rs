@@ -554,6 +554,7 @@ fn run_compare(view: ViewComponents) {
     view.stop_button.set_label(&english("Stop"));
     view.stop_button.set_sensitive(true);
     view.stop_button.set_visible(true);
+    let skip_hidden_files = settings().boolean("skip-hidden-files");
     // Keep only the newest scan update. Large folder trees can produce updates
     // faster than the GTK main thread can redraw them.
     let progress_updates = Arc::new(Mutex::new(None::<ScanProgressEvent>));
@@ -574,6 +575,7 @@ fn run_compare(view: ViewComponents) {
         let result = gio::spawn_blocking(move || {
             let service = DuetService::open(&root)?;
             service.compare_with_progress_and_cancel(
+                skip_hidden_files,
                 move |completed, total| {
                     if let Ok(mut latest) = updates_for_worker.lock() {
                         *latest = Some(ScanProgressEvent { completed, total });
@@ -1435,6 +1437,18 @@ fn install_actions(app: &adw::Application) {
                 let _ = settings_copy.set_string("target-only-action", value);
             });
             group.add(&target_only);
+            let skip_hidden_files = adw::SwitchRow::builder()
+                .title(&english("Skip hidden files"))
+                .subtitle(&english(
+                    "Ignore files and folders whose names begin with a period",
+                ))
+                .active(settings.boolean("skip-hidden-files"))
+                .build();
+            let settings_copy = settings.clone();
+            skip_hidden_files.connect_active_notify(move |row| {
+                let _ = settings_copy.set_boolean("skip-hidden-files", row.is_active());
+            });
+            group.add(&skip_hidden_files);
             page.add(&group);
             dialog.add(&page);
             dialog.present(Some(&window));

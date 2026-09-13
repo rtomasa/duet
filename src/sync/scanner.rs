@@ -7,6 +7,7 @@ use walkdir::WalkDir;
 
 pub fn scan_with_progress_and_cancel<F, C>(
     root: &Path,
+    skip_hidden_files: bool,
     progress: F,
     is_cancelled: C,
 ) -> Result<BTreeMap<PathBuf, FileSnapshot>>
@@ -21,7 +22,16 @@ where
     let walker = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| entry.path() == root || entry.file_name() != ".duet");
+        .filter_entry(|entry| {
+            entry.path() == root
+                || (entry.file_name() != ".duet"
+                    && (!skip_hidden_files
+                        || entry
+                            .path()
+                            .strip_prefix(root)
+                            .map(|path| !is_hidden_path(path))
+                            .unwrap_or(true)))
+        });
 
     for item in walker {
         check_cancelled(&is_cancelled)?;
@@ -76,6 +86,17 @@ where
         .collect())
 }
 
+fn is_hidden(name: &std::ffi::OsStr) -> bool {
+    name.to_string_lossy().starts_with('.')
+}
+
+pub fn is_hidden_path(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        std::path::Component::Normal(name) => is_hidden(name),
+        _ => false,
+    })
+}
+
 fn check_cancelled(is_cancelled: &dyn Fn() -> bool) -> Result<()> {
     if is_cancelled() {
         Err(DuetError::Cancelled)
@@ -110,6 +131,7 @@ mod tests {
 
         let snapshots = scan_with_progress_and_cancel(
             temp.path(),
+            false,
             |completed, total| events.lock().unwrap().push((completed, total)),
             || false,
         )
@@ -131,6 +153,7 @@ mod tests {
 
         let result = scan_with_progress_and_cancel(
             temp.path(),
+            false,
             |completed, total| {
                 if completed > 0 && total == 0 {
                     cancelled.store(true, Ordering::Relaxed);
@@ -140,5 +163,20 @@ mod tests {
         );
 
         assert!(matches!(result, Err(DuetError::Cancelled)));
+    }
+
+    #[test]
+    fn scan_can_skip_hidden_files_and_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("visible.txt"), b"visible").unwrap();
+        fs::write(temp.path().join(".hidden.txt"), b"hidden").unwrap();
+        fs::create_dir(temp.path().join(".hidden")).unwrap();
+        fs::write(temp.path().join(".hidden/nested.txt"), b"hidden").unwrap();
+
+        let snapshots =
+            scan_with_progress_and_cancel(temp.path(), true, |_, _| {}, || false).unwrap();
+
+        assert_eq!(snapshots.len(), 1);
+        assert!(snapshots.contains_key(Path::new("visible.txt")));
     }
 }

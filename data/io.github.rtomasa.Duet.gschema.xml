@@ -25,6 +25,11 @@
       <default>'ask'</default>
       <summary>Default action when a file exists only in Target</summary>
     </key>
+    <key name="skip-hidden-files" type="b">
+      <default>false</default>
+      <summary>Skip hidden files</summary>
+      <description>Ignore files and folders whose names begin with a period when comparing folders</description>
+    </key>
     <key name="window-width" type="i"><default>720</default></key>
     <key name="window-height" type="i"><default>620</default></key>
   </schema>
