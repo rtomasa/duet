@@ -2,6 +2,7 @@ use adw::prelude::*;
 use duet::{
     ConflictResolution, DuetError, DuetService, EntryKind, PlannedOperation, SyncAction, SyncPlan,
 };
+use glib::variant::ToVariant;
 use gtk::{gio, glib};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -717,9 +718,15 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     entries.sort_by(|left, right| left.path().cmp(right.path()));
     for entry in entries {
         let (path, widgets) = match entry {
-            VisibleEntry::Operation(operation) => {
-                (operation.relative_path.clone(), operation_row(operation))
-            }
+            VisibleEntry::Operation(operation) => (
+                operation.relative_path.clone(),
+                operation_row(
+                    view,
+                    operation,
+                    plan.source_snapshots.contains_key(&operation.relative_path),
+                    plan.duet_snapshots.contains_key(&operation.relative_path),
+                ),
+            ),
             VisibleEntry::Conflict(conflict) => (
                 conflict.operation.relative_path.clone(),
                 conflict_row(view, conflict),
@@ -776,7 +783,12 @@ fn total_entry_count(plan: &SyncPlan, kind: EntryKind) -> usize {
             .count()
 }
 
-fn operation_row(op: &PlannedOperation) -> OperationWidgets {
+fn operation_row(
+    view: &ViewComponents,
+    op: &PlannedOperation,
+    source_exists: bool,
+    duet_exists: bool,
+) -> OperationWidgets {
     let row = adw::ActionRow::builder()
         .title(display_path(&op.relative_path))
         .subtitle(action_label(op.action))
@@ -789,6 +801,15 @@ fn operation_row(op: &PlannedOperation) -> OperationWidgets {
     }));
     let progress = operation_progress_bar();
     row.add_suffix(&progress);
+    add_reveal_context_menu(
+        &row,
+        &view.toasts,
+        view.state.borrow().source_root.as_deref(),
+        view.state.borrow().duet_root.as_deref(),
+        &op.relative_path,
+        source_exists,
+        duet_exists,
+    );
     OperationWidgets { row, progress }
 }
 
@@ -848,6 +869,15 @@ fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWi
     }
     let progress = operation_progress_bar();
     row.add_suffix(&progress);
+    add_reveal_context_menu(
+        &row,
+        &view.toasts,
+        view.state.borrow().source_root.as_deref(),
+        view.state.borrow().duet_root.as_deref(),
+        &conflict.operation.relative_path,
+        conflict.source.is_some(),
+        conflict.duet.is_some(),
+    );
     OperationWidgets { row, progress }
 }
 
@@ -920,6 +950,107 @@ fn add_open_button(
         }
     });
     row.add_suffix(&button);
+}
+
+fn add_reveal_context_menu(
+    row: &adw::ActionRow,
+    toasts: &adw::ToastOverlay,
+    source_root: Option<&Path>,
+    duet_root: Option<&Path>,
+    relative_path: &Path,
+    source_exists: bool,
+    duet_exists: bool,
+) {
+    let source_path = source_exists
+        .then(|| source_root.map(|root| root.join(relative_path)))
+        .flatten();
+    let duet_path = duet_exists
+        .then(|| duet_root.map(|root| root.join(relative_path)))
+        .flatten();
+
+    let actions = gio::SimpleActionGroup::new();
+    let reveal_source = gio::SimpleAction::new("reveal-source", None);
+    reveal_source.set_enabled(source_path.is_some());
+    let toasts_copy = toasts.clone();
+    reveal_source.connect_activate(move |_, _| {
+        if let Some(path) = source_path.as_deref() {
+            reveal_in_explorer(&toasts_copy, path);
+        }
+    });
+    actions.add_action(&reveal_source);
+
+    let reveal_target = gio::SimpleAction::new("reveal-target", None);
+    reveal_target.set_enabled(duet_path.is_some());
+    let toasts_copy = toasts.clone();
+    reveal_target.connect_activate(move |_, _| {
+        if let Some(path) = duet_path.as_deref() {
+            reveal_in_explorer(&toasts_copy, path);
+        }
+    });
+    actions.add_action(&reveal_target);
+    row.insert_action_group("file", Some(&actions));
+
+    let menu = gio::Menu::new();
+    menu.append(
+        Some(&english("Reveal Source in Explorer")),
+        Some("file.reveal-source"),
+    );
+    menu.append(
+        Some(&english("Reveal Target in Explorer")),
+        Some("file.reveal-target"),
+    );
+    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    popover.set_parent(row);
+
+    let right_click = gtk::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |_, _, x, y| {
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        popover.popup();
+    });
+    row.add_controller(right_click);
+}
+
+fn reveal_in_explorer(toasts: &adw::ToastOverlay, path: &Path) {
+    let file = gio::File::for_path(path);
+    let uri = file.uri().to_string();
+    let folder_uri = gio::File::for_path(path.parent().unwrap_or(path))
+        .uri()
+        .to_string();
+    let toasts = toasts.clone();
+    glib::spawn_future_local(async move {
+        let revealed = match gio::DBusProxy::for_bus_future(
+            gio::BusType::Session,
+            gio::DBusProxyFlags::NONE,
+            None::<&gio::DBusInterfaceInfo>,
+            "org.freedesktop.FileManager1",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1",
+        )
+        .await
+        {
+            Ok(proxy) => {
+                let parameters = (vec![uri.as_str()], "").to_variant();
+                proxy
+                    .call_future("ShowItems", Some(&parameters), gio::DBusCallFlags::NONE, -1)
+                    .await
+                    .is_ok()
+            }
+            Err(_) => false,
+        };
+        if revealed {
+            return;
+        }
+        if let Err(error) =
+            gio::AppInfo::launch_default_for_uri(&folder_uri, None::<&gio::AppLaunchContext>)
+        {
+            show_error(
+                &toasts,
+                &english("Could not open the folder: {error}")
+                    .replace("{error}", &error.to_string()),
+            );
+        }
+    });
 }
 
 fn run_sync(view: ViewComponents) {
