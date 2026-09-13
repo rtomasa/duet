@@ -23,10 +23,6 @@
 /po/*.gmo
 /po/*.mo
 
-# Flatpak build state
-/.flatpak-builder/
-/repo/
-
 # Debian build and package staging files
 /debian/.debhelper/
 /debian/debhelper-build-stamp

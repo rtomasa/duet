@@ -44,4 +44,4 @@ A synchronization always starts from a fresh scan. The complete plan exists befo
 
 ## Packaging
 
-The same binary is used by native/Meson, Debian, and Flatpak builds. The Flatpak manifest intentionally avoids unrestricted host filesystem access; folders are selected by the user through the desktop portal.
+The same binary is used by native/Meson and Debian builds. Debian packaging metadata is maintained in `debian/`.
