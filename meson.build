@@ -1,4 +1,4 @@
-project('duet', 'rust', version: '0.1.1', meson_version: '>= 0.63')
+project('duet', 'rust', version: '0.2.0', meson_version: '>= 0.63')
 
 gnome = import('gnome')
 cargo = find_program('cargo')

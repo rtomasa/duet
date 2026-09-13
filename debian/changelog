@@ -1,3 +1,11 @@
+duet (0.2.0-1) unstable; urgency=medium
+
+  * Add options to skip hidden files and copy symbolic links.
+  * Add file-row context menus to reveal Source and Target copies.
+  * Support SFTP-mounted Target folders reliably.
+
+ -- Duet contributors <noreply@example.com>  Sun, 13 Sep 2026 16:00:00 +0200
+
 duet (0.1.1-1) unstable; urgency=medium
 
   * Prevent the interface from becoming unresponsive during folder checks.

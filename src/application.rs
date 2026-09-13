@@ -1647,6 +1647,12 @@ fn install_actions(app: &adw::Application) {
                 &english("Resolve Conflicts"),
                 &english("Choose which copy to keep, accept a deletion, or leave the item unchanged."),
             );
+            add_help_row(
+                &guide,
+                "folder-open-symbolic",
+                &english("Reveal a File"),
+                &english("Right-click a planned item or conflict to reveal its Source or Target copy in the file manager."),
+            );
             page.add(&guide);
 
             let options = adw::PreferencesGroup::builder()
@@ -1663,6 +1669,18 @@ fn install_actions(app: &adw::Application) {
                 "folder-symbolic",
                 &english("When a file exists only in Target"),
                 &english("Ask whether to keep it on Target, add it to Source, or remove it from Target."),
+            );
+            add_help_row(
+                &options,
+                "view-conceal-symbolic",
+                &english("Skip hidden files"),
+                &english("Ignore files and folders whose names begin with a period when checking folders."),
+            );
+            add_help_row(
+                &options,
+                "emblem-symbolic-link-symbolic",
+                &english("Copy symbolic links"),
+                &english("Copy symbolic links as links. Turn this off to ignore them during checks."),
             );
             page.add(&options);
             dialog.add(&page);

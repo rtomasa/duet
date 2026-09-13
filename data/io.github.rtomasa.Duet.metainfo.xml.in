@@ -20,6 +20,11 @@
     <display_length compare="ge">360</display_length>
   </recommends>
   <releases>
+    <release version="0.2.0" date="2026-09-13">
+      <description>
+        <p>Adds controls for hidden files and symbolic links, contextual file-reveal actions, and reliable support for SFTP-mounted Targets.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-09-13">
       <description>
         <p>Improves synchronization responsiveness, copy progress accuracy, and completion performance.</p>
