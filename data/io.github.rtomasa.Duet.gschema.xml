@@ -15,6 +15,16 @@
       <default>'ask'</default>
       <summary>Default action when a file was deleted</summary>
     </key>
+    <key name="target-only-action" type="s">
+      <choices>
+        <choice value="ask"/>
+        <choice value="skip"/>
+        <choice value="copy"/>
+        <choice value="delete"/>
+      </choices>
+      <default>'ask'</default>
+      <summary>Default action when a file exists only in Target</summary>
+    </key>
     <key name="window-width" type="i"><default>720</default></key>
     <key name="window-height" type="i"><default>620</default></key>
   </schema>

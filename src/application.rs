@@ -907,7 +907,7 @@ fn run_sync(view: ViewComponents) {
     view.compare_button.set_sensitive(false);
     view.sync_button.set_sensitive(false);
     glib::spawn_future_local(async move {
-        if let Some(plan) = prepare_deletions(&view, plan).await {
+        if let Some(plan) = prepare_sync_operations(&view, plan).await {
             perform_sync(view, plan, root, resolutions);
         } else {
             finish_sync_controls(&view);
@@ -925,6 +925,18 @@ enum DeletionChoice {
     Skip,
     Restore,
     Delete,
+}
+
+#[derive(Clone, Copy)]
+enum TargetOnlyChoice {
+    Skip,
+    CopyToSource,
+    DeleteFromTarget,
+}
+
+async fn prepare_sync_operations(view: &ViewComponents, plan: SyncPlan) -> Option<SyncPlan> {
+    let plan = prepare_deletions(view, plan).await?;
+    prepare_target_only_files(view, plan).await
 }
 
 async fn prepare_deletions(view: &ViewComponents, mut plan: SyncPlan) -> Option<SyncPlan> {
@@ -997,6 +1009,70 @@ fn apply_deletion_choice(operation: &mut PlannedOperation, choice: DeletionChoic
         (DeletionChoice::Restore, SyncAction::DeleteDuet) => SyncAction::DuetToSource,
         (DeletionChoice::Restore, SyncAction::DeleteSource) => SyncAction::SourceToDuet,
         (DeletionChoice::Delete, action) | (DeletionChoice::Restore, action) => action,
+    };
+}
+
+async fn prepare_target_only_files(view: &ViewComponents, mut plan: SyncPlan) -> Option<SyncPlan> {
+    let policy = settings().string("target-only-action");
+    let fixed_choice = match policy.as_str() {
+        "skip" => Some(TargetOnlyChoice::Skip),
+        "copy" => Some(TargetOnlyChoice::CopyToSource),
+        "delete" => Some(TargetOnlyChoice::DeleteFromTarget),
+        _ => None,
+    };
+    let mut choice_for_remaining = fixed_choice;
+    for operation in plan.operations.iter_mut().filter(|operation| {
+        operation.action == SyncAction::DuetToSource
+            && operation.source_state == duet::ChangeState::Missing
+            && operation.duet_state == duet::ChangeState::Created
+    }) {
+        let choice = if let Some(choice) = choice_for_remaining {
+            choice
+        } else {
+            let (choice, do_not_ask) = ask_target_only_action(&view.window, operation).await?;
+            if do_not_ask {
+                choice_for_remaining = Some(choice);
+            }
+            choice
+        };
+        apply_target_only_choice(operation, choice);
+    }
+    Some(plan)
+}
+
+async fn ask_target_only_action(
+    window: &adw::ApplicationWindow,
+    operation: &PlannedOperation,
+) -> Option<(TargetOnlyChoice, bool)> {
+    let message = english("{path} exists only in Target. Choose what to do.")
+        .replace("{path}", &operation.relative_path.to_string_lossy());
+    let dialog = adw::AlertDialog::new(Some(&english("File Only in Target")), Some(&message));
+    dialog.add_responses(&[
+        ("skip", &english("Keep Only in Target")),
+        ("copy", &english("Add to Source")),
+        ("delete", &english("Remove from Target")),
+    ]);
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("skip"));
+    dialog.set_close_response("cancel");
+    let do_not_ask =
+        gtk::CheckButton::with_label(&english("Do not ask again for remaining Target-only files"));
+    dialog.set_extra_child(Some(&do_not_ask));
+    let response = dialog.choose_future(window).await;
+    let choice = match response.as_str() {
+        "skip" => TargetOnlyChoice::Skip,
+        "copy" => TargetOnlyChoice::CopyToSource,
+        "delete" => TargetOnlyChoice::DeleteFromTarget,
+        _ => return None,
+    };
+    Some((choice, do_not_ask.is_active()))
+}
+
+fn apply_target_only_choice(operation: &mut PlannedOperation, choice: TargetOnlyChoice) {
+    operation.action = match choice {
+        TargetOnlyChoice::Skip => SyncAction::None,
+        TargetOnlyChoice::CopyToSource => SyncAction::DuetToSource,
+        TargetOnlyChoice::DeleteFromTarget => SyncAction::DeleteDuet,
     };
 }
 
@@ -1308,6 +1384,33 @@ fn install_actions(app: &adw::Application) {
                 let _ = settings_copy.set_string("deletion-action", value);
             });
             group.add(&deletion);
+            let keep_target = english("Keep Only in Target");
+            let add_to_source = english("Add to Source");
+            let remove_target = english("Remove from Target");
+            let target_only_actions =
+                gtk::StringList::new(&[&ask, &keep_target, &add_to_source, &remove_target]);
+            let target_only = adw::ComboRow::builder()
+                .title(&english("When a file exists only in Target"))
+                .subtitle(&english("Choose the default synchronization action"))
+                .model(&target_only_actions)
+                .selected(match settings.string("target-only-action").as_str() {
+                    "skip" => 1,
+                    "copy" => 2,
+                    "delete" => 3,
+                    _ => 0,
+                })
+                .build();
+            let settings_copy = settings.clone();
+            target_only.connect_selected_notify(move |row| {
+                let value = match row.selected() {
+                    1 => "skip",
+                    2 => "copy",
+                    3 => "delete",
+                    _ => "ask",
+                };
+                let _ = settings_copy.set_string("target-only-action", value);
+            });
+            group.add(&target_only);
             page.add(&group);
             dialog.add(&page);
             dialog.present(Some(&window));
@@ -1367,6 +1470,12 @@ fn install_actions(app: &adw::Application) {
                 "edit-delete-symbolic",
                 &english("When a file is deleted"),
                 &english("Ask what to do, skip it, restore the deleted file, or delete the other copy."),
+            );
+            add_help_row(
+                &options,
+                "folder-symbolic",
+                &english("When a file exists only in Target"),
+                &english("Ask whether to keep it on Target, add it to Source, or remove it from Target."),
             );
             page.add(&options);
             dialog.add(&page);
@@ -1483,6 +1592,27 @@ mod tests {
         let mut deleted = deletion(SyncAction::DeleteSource);
         apply_deletion_choice(&mut deleted, DeletionChoice::Delete);
         assert_eq!(deleted.action, SyncAction::DeleteSource);
+    }
+
+    #[test]
+    fn target_only_choices_keep_copy_or_remove_the_file() {
+        let mut operation = PlannedOperation {
+            relative_path: PathBuf::from("target-only.txt"),
+            kind: EntryKind::File,
+            source_state: ChangeState::Missing,
+            duet_state: ChangeState::Created,
+            action: SyncAction::DuetToSource,
+        };
+
+        apply_target_only_choice(&mut operation, TargetOnlyChoice::Skip);
+        assert_eq!(operation.action, SyncAction::None);
+
+        operation.action = SyncAction::DuetToSource;
+        apply_target_only_choice(&mut operation, TargetOnlyChoice::CopyToSource);
+        assert_eq!(operation.action, SyncAction::DuetToSource);
+
+        apply_target_only_choice(&mut operation, TargetOnlyChoice::DeleteFromTarget);
+        assert_eq!(operation.action, SyncAction::DeleteDuet);
     }
 
     #[test]
