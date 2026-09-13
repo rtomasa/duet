@@ -1138,11 +1138,16 @@ async fn ask_deletion_action(
         english("{path} was deleted from {location}. Choose what to do with the remaining copy.")
             .replace("{path}", &operation.relative_path.to_string_lossy())
             .replace("{location}", &location);
+    let delete_label = if operation.action == SyncAction::DeleteDuet {
+        english("Delete from Target")
+    } else {
+        english("Delete from Source")
+    };
     let dialog = adw::AlertDialog::new(Some(&english("File Deleted")), Some(&message));
     dialog.add_responses(&[
         ("skip", &english("Skip")),
         ("restore", &english("Restore Deleted File")),
-        ("delete", &english("Delete Other Copy")),
+        ("delete", &delete_label),
     ]);
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("skip"));
