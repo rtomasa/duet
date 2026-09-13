@@ -24,8 +24,8 @@ install_data(
   install_dir: datadir / 'glib-2.0' / 'schemas',
 )
 install_data(
-  'data/icons/hicolor/scalable/apps' / app_id + '.svg',
-  install_dir: datadir / 'icons/hicolor/scalable/apps',
+  'data/icons/hicolor/512x512/apps' / app_id + '.png',
+  install_dir: datadir / 'icons/hicolor/512x512/apps',
 )
 
 target_dir = meson.current_build_dir() / 'cargo-target'
