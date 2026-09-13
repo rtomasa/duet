@@ -115,65 +115,6 @@ where
         .collect())
 }
 
-pub fn scan_paths_verified(
-    root: &Path,
-    relative_paths: &[PathBuf],
-) -> Result<BTreeMap<PathBuf, FileSnapshot>> {
-    if !root.is_dir() {
-        return Err(BriefcaseError::SourceUnavailable(root.to_path_buf()));
-    }
-    let mut snapshots = Vec::new();
-    let mut hash_tasks = Vec::new();
-    for relative in relative_paths {
-        validate_relative(relative)?;
-        let path = root.join(relative);
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(BriefcaseError::io(&path, error)),
-        };
-        let file_type = metadata.file_type();
-        if file_type.is_symlink() {
-            return Err(BriefcaseError::UnsupportedSymlink(relative.clone()));
-        }
-        let kind = if file_type.is_dir() {
-            EntryKind::Directory
-        } else {
-            EntryKind::File
-        };
-        let mtime_ns = metadata
-            .modified()
-            .ok()
-            .and_then(|time| {
-                time.duration_since(UNIX_EPOCH)
-                    .ok()
-                    .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
-            })
-            .unwrap_or(0);
-        let size = if kind == EntryKind::File {
-            metadata.len()
-        } else {
-            0
-        };
-        let snapshot_index = snapshots.len();
-        snapshots.push(FileSnapshot {
-            relative_path: relative.clone(),
-            kind,
-            size,
-            mtime_ns,
-            hash: None,
-        });
-        if kind == EntryKind::File {
-            hash_tasks.push((snapshot_index, path, size.max(1)));
-        }
-    }
-    hash_files(&mut snapshots, &hash_tasks, &|_, _| {}, &|| false)?;
-    Ok(snapshots
-        .into_iter()
-        .map(|snapshot| (snapshot.relative_path.clone(), snapshot))
-        .collect())
-}
-
 fn hash_files<F, C>(
     snapshots: &mut [FileSnapshot],
     tasks: &[(usize, PathBuf, u64)],

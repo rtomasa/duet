@@ -1,6 +1,6 @@
 [package]
 name = "gnome-briefcase"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Explicit, local, bidirectional folder synchronization for GNOME"
@@ -8,7 +8,7 @@ repository = "https://github.com/rtomasa/gnome-briefcase"
 
 [features]
 default = []
-gui = ["dep:gtk", "dep:adw", "dep:glib", "dep:gio", "dep:gettext-rs"]
+gui = ["dep:gtk", "dep:adw", "dep:glib", "dep:gio"]
 
 [dependencies]
 anyhow = "1.0"
@@ -29,7 +29,6 @@ gtk = { package = "gtk4", version = "0.9", features = ["v4_10"], optional = true
 adw = { package = "libadwaita", version = "0.7", features = ["v1_5"], optional = true }
 glib = { version = "0.20", optional = true }
 gio = { version = "0.20", optional = true }
-gettext-rs = { version = "0.7", features = ["gettext-system"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.12"
@@ -41,4 +40,3 @@ path = "src/main.rs"
 [profile.release]
 lto = "thin"
 strip = "symbols"
-

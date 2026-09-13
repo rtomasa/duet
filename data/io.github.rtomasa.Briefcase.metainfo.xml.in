@@ -20,9 +20,13 @@
     <display_length compare="ge">360</display_length>
   </recommends>
   <releases>
+    <release version="0.1.1" date="2026-09-13">
+      <description>
+        <p>Improves synchronization responsiveness, copy progress accuracy, and completion performance.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-12">
       <description><p>Initial development release.</p></description>
     </release>
   </releases>
 </component>
-

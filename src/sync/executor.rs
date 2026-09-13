@@ -1,6 +1,7 @@
-use crate::{BriefcaseError, EntryKind, PlannedOperation, Result, SyncAction};
+use crate::{BriefcaseError, EntryKind, FileSnapshot, PlannedOperation, Result, SyncAction};
 use filetime::FileTime;
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -9,11 +10,21 @@ pub struct MutationLock {
     file: File,
 }
 
+#[derive(Debug, Clone)]
+pub struct CopiedMetadata {
+    pub hash: Option<String>,
+    pub from_size: u64,
+    pub from_mtime_ns: i64,
+    pub to_size: u64,
+    pub to_mtime_ns: i64,
+}
+
 impl MutationLock {
     pub fn acquire(briefcase_root: &Path) -> Result<Self> {
         let path = briefcase_root.join(".briefcase/lock");
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&path)
@@ -61,48 +72,47 @@ pub fn apply_one_with_progress(
     source_root: &Path,
     briefcase_root: &Path,
     op: &PlannedOperation,
+    expected: Option<&FileSnapshot>,
     progress: &mut dyn FnMut(u64, u64),
     is_cancelled: &dyn Fn() -> bool,
-) -> Result<()> {
+) -> Result<Option<CopiedMetadata>> {
     check_cancelled(is_cancelled)?;
     match op.action {
-        SyncAction::SourceToBriefcase => {
-            copy_entry(
-                source_root,
-                briefcase_root,
-                &op.relative_path,
-                op.kind,
-                progress,
-                is_cancelled,
-            )
-        }
-        SyncAction::BriefcaseToSource => {
-            copy_entry(
-                briefcase_root,
-                source_root,
-                &op.relative_path,
-                op.kind,
-                progress,
-                is_cancelled,
-            )
-        }
+        SyncAction::SourceToBriefcase => copy_entry(
+            source_root,
+            briefcase_root,
+            &op.relative_path,
+            op.kind,
+            expected,
+            progress,
+            is_cancelled,
+        ),
+        SyncAction::BriefcaseToSource => copy_entry(
+            briefcase_root,
+            source_root,
+            &op.relative_path,
+            op.kind,
+            expected,
+            progress,
+            is_cancelled,
+        ),
         SyncAction::DeleteSource => {
             let result = delete_entry(source_root, &op.relative_path, op.kind);
             if result.is_ok() {
                 progress(1, 1);
             }
-            result
+            result.map(|()| None)
         }
         SyncAction::DeleteBriefcase => {
             let result = delete_entry(briefcase_root, &op.relative_path, op.kind);
             if result.is_ok() {
                 progress(1, 1);
             }
-            result
+            result.map(|()| None)
         }
         SyncAction::None | SyncAction::Adopt | SyncAction::RemoveBaseline => {
             progress(1, 1);
-            Ok(())
+            Ok(None)
         }
         SyncAction::Conflict => Err(BriefcaseError::UnresolvedConflict(op.relative_path.clone())),
     }
@@ -113,16 +123,25 @@ fn copy_entry(
     to_root: &Path,
     relative: &Path,
     kind: EntryKind,
+    expected: Option<&FileSnapshot>,
     progress: &mut dyn FnMut(u64, u64),
     is_cancelled: &dyn Fn() -> bool,
-) -> Result<()> {
+) -> Result<Option<CopiedMetadata>> {
     let from = checked_existing(from_root, relative)?;
     let to = checked_destination(to_root, relative)?;
     if kind == EntryKind::Directory {
         fs::create_dir_all(&to).map_err(|e| BriefcaseError::io(&to, e))?;
         checked_parent(to_root, &to)?;
         progress(1, 1);
-        return Ok(());
+        let from_metadata = fs::metadata(&from).map_err(|e| BriefcaseError::io(&from, e))?;
+        let to_metadata = fs::metadata(&to).map_err(|e| BriefcaseError::io(&to, e))?;
+        return Ok(Some(CopiedMetadata {
+            hash: None,
+            from_size: 0,
+            from_mtime_ns: modified_ns(&from_metadata),
+            to_size: 0,
+            to_mtime_ns: modified_ns(&to_metadata),
+        }));
     }
     if fs::symlink_metadata(&from)
         .map_err(|e| BriefcaseError::io(&from, e))?
@@ -139,14 +158,17 @@ fn copy_entry(
 
     let mut input = File::open(&from).map_err(|e| BriefcaseError::io(&from, e))?;
     let metadata = input.metadata().map_err(|e| BriefcaseError::io(&from, e))?;
+    ensure_matches_checked_snapshot(relative, &metadata, expected)?;
     let total = metadata.len();
-    progress(0, total);
+    let progress_total = total.max(1);
+    progress(0, progress_total);
     let mut temporary = tempfile::Builder::new()
         .prefix(".briefcase-tmp-")
         .tempfile_in(parent)
         .map_err(|e| BriefcaseError::io(parent, e))?;
     let mut buffer = [0_u8; 1024 * 1024];
     let mut written = 0_u64;
+    let mut digest = Sha256::new();
     loop {
         check_cancelled(is_cancelled)?;
         let count = input
@@ -158,8 +180,13 @@ fn copy_entry(
         temporary
             .write_all(&buffer[..count])
             .map_err(|e| BriefcaseError::io(&to, e))?;
+        digest.update(&buffer[..count]);
         written += count as u64;
-        progress(written, total);
+        // Reserve 100% for the point at which the complete temporary file has
+        // been flushed, persisted, and had its metadata applied.
+        if written < total {
+            progress(written, progress_total);
+        }
     }
     check_cancelled(is_cancelled)?;
     temporary.flush().map_err(|e| BriefcaseError::io(&to, e))?;
@@ -173,6 +200,12 @@ fn copy_entry(
             relative.display()
         )));
     }
+    let hash = hex::encode(digest.finalize());
+    if let Some(expected_hash) = expected.and_then(|snapshot| snapshot.hash.as_deref()) {
+        if hash != expected_hash {
+            return Err(changed_after_check(relative));
+        }
+    }
     temporary
         .persist(&to)
         .map_err(|e| BriefcaseError::io(&to, e.error))?;
@@ -180,7 +213,59 @@ fn copy_entry(
         let time = FileTime::from_system_time(modified);
         filetime::set_file_mtime(&to, time).map_err(|e| BriefcaseError::io(&to, e))?;
     }
+    let from_metadata = fs::metadata(&from).map_err(|e| BriefcaseError::io(&from, e))?;
+    ensure_matches_checked_snapshot(relative, &from_metadata, expected)?;
+    let to_metadata = fs::metadata(&to).map_err(|e| BriefcaseError::io(&to, e))?;
+    if to_metadata.len() != written {
+        return Err(BriefcaseError::Other(anyhow::anyhow!(
+            "The copied size of {} does not match the original",
+            relative.display()
+        )));
+    }
+    progress(progress_total, progress_total);
+    Ok(Some(CopiedMetadata {
+        hash: Some(hash),
+        from_size: from_metadata.len(),
+        from_mtime_ns: modified_ns(&from_metadata),
+        to_size: to_metadata.len(),
+        to_mtime_ns: modified_ns(&to_metadata),
+    }))
+}
+
+fn ensure_matches_checked_snapshot(
+    relative: &Path,
+    metadata: &fs::Metadata,
+    expected: Option<&FileSnapshot>,
+) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    if expected.kind != EntryKind::File
+        || expected.size != metadata.len()
+        || expected.mtime_ns != modified_ns(metadata)
+    {
+        return Err(changed_after_check(relative));
+    }
     Ok(())
+}
+
+fn changed_after_check(relative: &Path) -> BriefcaseError {
+    BriefcaseError::Other(anyhow::anyhow!(
+        "{} changed after the folders were checked; check again before synchronizing",
+        relative.display()
+    ))
+}
+
+fn modified_ns(metadata: &fs::Metadata) -> i64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| {
+            time.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
+        })
+        .unwrap_or(0)
 }
 
 fn check_cancelled(is_cancelled: &dyn Fn() -> bool) -> Result<()> {

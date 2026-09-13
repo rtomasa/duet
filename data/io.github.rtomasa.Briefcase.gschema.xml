@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<schemalist gettext-domain="gnome-briefcase">
+<schemalist>
   <schema id="io.github.rtomasa.Briefcase" path="/io/github/rtomasa/Briefcase/">
     <key name="known-briefcases" type="as">
       <default>[]</default>

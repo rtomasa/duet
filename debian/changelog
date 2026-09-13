@@ -1,6 +1,13 @@
+gnome-briefcase (0.1.1-1) unstable; urgency=medium
+
+  * Prevent the interface from becoming unresponsive during folder checks.
+  * Report accurate byte progress while copying files.
+  * Reduce synchronization completion time and database writes.
+
+ -- GNOME Briefcase contributors <noreply@example.com>  Sun, 13 Sep 2026 11:14:37 +0200
+
 gnome-briefcase (0.1.0-1) unstable; urgency=medium
 
   * Initial development release.
 
  -- GNOME Briefcase contributors <noreply@example.com>  Sat, 12 Sep 2026 12:00:00 +0200
-

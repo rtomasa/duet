@@ -1,6 +1,6 @@
 use super::{executor, planner, scanner};
 use crate::{
-    BaselineEntry, BriefcaseError, BriefcaseManifest, ConflictResolution, Database,
+    BaselineEntry, BriefcaseError, BriefcaseManifest, ConflictResolution, Database, FileSnapshot,
     ManifestRepository, PlannedOperation, Result, SyncAction, SyncPlan,
 };
 use std::collections::BTreeMap;
@@ -154,26 +154,64 @@ impl BriefcaseService {
         }
         let operations = executor::ordered(&operations);
         let transaction = self.database.begin_transaction(&operations)?;
-        for (sequence, operation) in operations.iter().enumerate() {
-            if let Err(error) = executor::apply_one_with_progress(
+        let mut updated_entries = Vec::new();
+        let mut removed_paths = Vec::new();
+        for operation in &operations {
+            let expected = match checked_origin_snapshot(plan, operation) {
+                Ok(expected) => expected,
+                Err(error) => {
+                    let _ = self
+                        .database
+                        .fail_transaction(&transaction, &error.to_string());
+                    return Err(error);
+                }
+            };
+            let copied = match executor::apply_one_with_progress(
                 &self.manifest.source.last_known_path,
                 &self.briefcase_root,
                 operation,
+                expected,
                 &mut |completed, total| progress(operation, completed, total, false),
                 &is_cancelled,
             ) {
-                let _ = self
-                    .database
-                    .fail_transaction(&transaction, &error.to_string());
-                return Err(error);
-            }
-            self.database
-                .mark_operation_complete(&transaction, sequence)?;
-        }
-        self.refresh_baseline_for(&operations)?;
-        self.database.complete_transaction(&transaction)?;
-        for operation in &operations {
+                Ok(copied) => copied,
+                Err(error) => {
+                    let _ = self
+                        .database
+                        .fail_transaction(&transaction, &error.to_string());
+                    return Err(error);
+                }
+            };
+            match baseline_change(plan, operation, copied) {
+                Ok(Some(entry)) => updated_entries.push(entry),
+                Ok(None) => removed_paths.push(operation.relative_path.clone()),
+                Err(error) => {
+                    let _ = self
+                        .database
+                        .fail_transaction(&transaction, &error.to_string());
+                    return Err(error);
+                }
+            };
+            // The filesystem operation itself is complete. Reporting this here
+            // lets the UI retire rows steadily instead of receiving one large
+            // burst only after the database commit.
             progress(operation, 1, 1, true);
+        }
+        if is_cancelled() {
+            let error = BriefcaseError::Cancelled;
+            let _ = self
+                .database
+                .fail_transaction(&transaction, &error.to_string());
+            return Err(error);
+        }
+        if let Err(error) =
+            self.database
+                .finalize_sync(&transaction, &updated_entries, &removed_paths)
+        {
+            let _ = self
+                .database
+                .fail_transaction(&transaction, &error.to_string());
+            return Err(error);
         }
         Ok(SyncOutcome {
             applied: operations.len(),
@@ -181,39 +219,99 @@ impl BriefcaseService {
             recovered_incomplete_transaction: recovered,
         })
     }
+}
 
-    fn refresh_baseline_for(&self, operations: &[PlannedOperation]) -> Result<()> {
-        let paths: Vec<_> = operations
-            .iter()
-            .map(|operation| operation.relative_path.clone())
-            .collect();
-        let source = scanner::scan_paths_verified(&self.manifest.source.last_known_path, &paths)?;
-        let briefcase = scanner::scan_paths_verified(&self.briefcase_root, &paths)?;
-        for operation in operations {
-            let path = &operation.relative_path;
-            match (source.get(path), briefcase.get(path)) {
-                (None, None) => self.database.remove_entry(path)?,
-                (Some(left), Some(right)) if left.kind == right.kind && left.hash == right.hash => {
-                    self.database.upsert_entry(&BaselineEntry {
-                        relative_path: path.clone(),
-                        kind: left.kind,
-                        baseline_hash: left.hash.clone(),
-                        source_size: Some(left.size),
-                        source_mtime_ns: Some(left.mtime_ns),
-                        briefcase_size: Some(right.size),
-                        briefcase_mtime_ns: Some(right.mtime_ns),
-                    })?;
-                }
-                _ => {
-                    return Err(BriefcaseError::Other(anyhow::anyhow!(
-                        "The operation on {} did not produce equivalent copies",
-                        path.display()
-                    )))
-                }
+fn checked_origin_snapshot<'a>(
+    plan: &'a SyncPlan,
+    operation: &PlannedOperation,
+) -> Result<Option<&'a FileSnapshot>> {
+    let snapshot = match operation.action {
+        SyncAction::SourceToBriefcase => plan.source_snapshots.get(&operation.relative_path),
+        SyncAction::BriefcaseToSource => plan.briefcase_snapshots.get(&operation.relative_path),
+        _ => return Ok(None),
+    };
+    snapshot.map(Some).ok_or_else(|| {
+        BriefcaseError::Other(anyhow::anyhow!(
+            "The checked copy of {} is no longer available",
+            operation.relative_path.display()
+        ))
+    })
+}
+
+fn baseline_change(
+    plan: &SyncPlan,
+    operation: &PlannedOperation,
+    copied: Option<executor::CopiedMetadata>,
+) -> Result<Option<BaselineEntry>> {
+    let path = &operation.relative_path;
+    let entry = match operation.action {
+        SyncAction::SourceToBriefcase | SyncAction::BriefcaseToSource => {
+            let copied = copied.ok_or_else(|| {
+                BriefcaseError::Other(anyhow::anyhow!(
+                    "No copy metadata was recorded for {}",
+                    path.display()
+                ))
+            })?;
+            let (source_size, source_mtime_ns, briefcase_size, briefcase_mtime_ns) =
+                if operation.action == SyncAction::SourceToBriefcase {
+                    (
+                        copied.from_size,
+                        copied.from_mtime_ns,
+                        copied.to_size,
+                        copied.to_mtime_ns,
+                    )
+                } else {
+                    (
+                        copied.to_size,
+                        copied.to_mtime_ns,
+                        copied.from_size,
+                        copied.from_mtime_ns,
+                    )
+                };
+            BaselineEntry {
+                relative_path: path.clone(),
+                kind: operation.kind,
+                baseline_hash: copied.hash,
+                source_size: Some(source_size),
+                source_mtime_ns: Some(source_mtime_ns),
+                briefcase_size: Some(briefcase_size),
+                briefcase_mtime_ns: Some(briefcase_mtime_ns),
             }
         }
-        Ok(())
-    }
+        SyncAction::Adopt => {
+            let source = plan.source_snapshots.get(path);
+            let briefcase = plan.briefcase_snapshots.get(path);
+            let (Some(source), Some(briefcase)) = (source, briefcase) else {
+                return Err(BriefcaseError::Other(anyhow::anyhow!(
+                    "The copies of {} are no longer available",
+                    path.display()
+                )));
+            };
+            if source.kind != briefcase.kind || source.hash != briefcase.hash {
+                return Err(BriefcaseError::Other(anyhow::anyhow!(
+                    "The checked copies of {} are not equivalent",
+                    path.display()
+                )));
+            }
+            BaselineEntry {
+                relative_path: path.clone(),
+                kind: source.kind,
+                baseline_hash: source.hash.clone(),
+                source_size: Some(source.size),
+                source_mtime_ns: Some(source.mtime_ns),
+                briefcase_size: Some(briefcase.size),
+                briefcase_mtime_ns: Some(briefcase.mtime_ns),
+            }
+        }
+        SyncAction::DeleteSource | SyncAction::DeleteBriefcase | SyncAction::RemoveBaseline => {
+            return Ok(None)
+        }
+        SyncAction::None => return Ok(None),
+        SyncAction::Conflict => {
+            return Err(BriefcaseError::UnresolvedConflict(path.clone()));
+        }
+    };
+    Ok(Some(entry))
 }
 
 fn resolve_conflict(
@@ -383,6 +481,59 @@ mod tests {
 
         assert!(matches!(result, Err(BriefcaseError::Cancelled)));
         assert!(!briefcase.join("large.bin").exists());
+    }
+
+    #[test]
+    fn synchronization_rejects_content_changed_after_check_even_with_same_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let briefcase = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        let path = source.join("changed.bin");
+        fs::write(&path, b"original").unwrap();
+        let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let plan = service.compare(ScanMode::Verified).unwrap();
+
+        // Keep both size and modification time unchanged so the streaming hash,
+        // rather than metadata alone, has to catch the stale plan.
+        fs::write(&path, b"tampered").unwrap();
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(original_mtime))
+            .unwrap();
+
+        let result = service.synchronize(&plan, &BTreeMap::new());
+
+        assert!(result.is_err());
+        assert!(!briefcase.join("changed.bin").exists());
+    }
+
+    #[test]
+    fn empty_file_copy_reports_determinate_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let briefcase = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("empty.bin"), []).unwrap();
+        let service = BriefcaseService::create(&source, &briefcase, "Test").unwrap();
+        let plan = service.compare(ScanMode::Verified).unwrap();
+        let mut events = Vec::new();
+
+        service
+            .synchronize_with_progress(
+                &plan,
+                &BTreeMap::new(),
+                |operation, completed, total, finished| {
+                    if operation.relative_path == Path::new("empty.bin") {
+                        events.push((completed, total, finished));
+                    }
+                },
+            )
+            .unwrap();
+
+        assert!(events
+            .iter()
+            .any(|(completed, total, finished)| *completed == 1 && *total == 1 && !finished));
+        assert!(events.iter().any(|(_, _, finished)| *finished));
     }
 
     #[test]

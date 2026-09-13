@@ -131,6 +131,69 @@ impl Database {
         Ok(())
     }
 
+    /// Commit the new baseline and the journal completion in one SQLite
+    /// transaction. Besides making the state atomic, this avoids one durable
+    /// database commit per synchronized file on slow removable storage.
+    pub fn finalize_sync(
+        &self,
+        transaction_id: &str,
+        entries: &[BaselineEntry],
+        removed_paths: &[PathBuf],
+    ) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for path in removed_paths {
+            tx.execute(
+                "DELETE FROM entries WHERE relative_path = ?1",
+                params![path.to_string_lossy()],
+            )?;
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        for entry in entries {
+            tx.execute(
+                "INSERT INTO entries (
+                    relative_path, entry_type, baseline_hash,
+                    source_size, source_mtime_ns, briefcase_size, briefcase_mtime_ns, last_sync_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(relative_path) DO UPDATE SET
+                    entry_type=excluded.entry_type,
+                    baseline_hash=excluded.baseline_hash,
+                    source_size=excluded.source_size,
+                    source_mtime_ns=excluded.source_mtime_ns,
+                    briefcase_size=excluded.briefcase_size,
+                    briefcase_mtime_ns=excluded.briefcase_mtime_ns,
+                    last_sync_at=excluded.last_sync_at",
+                params![
+                    entry.relative_path.to_string_lossy(),
+                    match entry.kind {
+                        EntryKind::File => "file",
+                        EntryKind::Directory => "directory",
+                    },
+                    entry.baseline_hash,
+                    entry.source_size.map(|value| value as i64),
+                    entry.source_mtime_ns,
+                    entry.briefcase_size.map(|value| value as i64),
+                    entry.briefcase_mtime_ns,
+                    now,
+                ],
+            )?;
+        }
+        tx.execute(
+            "UPDATE transaction_operations SET state = 'COMPLETE'
+             WHERE transaction_id = ?1",
+            params![transaction_id],
+        )?;
+        tx.execute(
+            "UPDATE transactions SET state = 'COMPLETE', completed_at = ?2 WHERE id = ?1",
+            params![transaction_id, now],
+        )?;
+        tx.execute(
+            "UPDATE briefcase SET last_sync_at = ?1 WHERE singleton = 1",
+            params![now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn fail_transaction(&self, transaction_id: &str, error: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE transactions SET state = 'INTERRUPTED', error = ?2 WHERE id = ?1",
