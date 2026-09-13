@@ -1,9 +1,0 @@
-Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: duet
-Source: https://github.com/rtomasa/duet
-
-Files: *
-Copyright: 2026 Duet contributors
-License: GPL-3+
- On Debian systems the full text of the GNU General Public License version 3
- can be found in /usr/share/common-licenses/GPL-3.
