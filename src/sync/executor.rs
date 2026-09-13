@@ -108,7 +108,7 @@ pub fn apply_one_with_progress(
             }
             result.map(|()| None)
         }
-        SyncAction::None | SyncAction::RemoveBaseline => {
+        SyncAction::None | SyncAction::RemoveBaseline | SyncAction::RecordBaseline => {
             progress(1, 1);
             Ok(None)
         }

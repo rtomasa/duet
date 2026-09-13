@@ -26,7 +26,17 @@ pub fn build_plan(
         let duet_now = plan.duet_snapshots.get(&path);
         let source_state = change_state(previous, source_now, BaselineSide::Source);
         let duet_state = change_state(previous, duet_now, BaselineSide::Target);
-        let action = decide(source_state, duet_state);
+        let mut action = decide(source_state, duet_state);
+        // A missing or lost state database leaves matching copies looking as
+        // though they were independently created. Do not turn those into a
+        // conflict (or overwrite either one): record their current metadata
+        // as a fresh baseline instead.
+        if previous.is_none()
+            && action == SyncAction::Conflict
+            && snapshots_match(source_now, duet_now)
+        {
+            action = SyncAction::RecordBaseline;
+        }
         let kind = source_now
             .map(|s| s.kind)
             .or_else(|| duet_now.map(|s| s.kind))
@@ -50,6 +60,18 @@ pub fn build_plan(
         }
     }
     plan
+}
+
+fn snapshots_match(source: Option<&FileSnapshot>, duet: Option<&FileSnapshot>) -> bool {
+    match (source, duet) {
+        (Some(source), Some(duet)) if source.kind == crate::EntryKind::Directory => {
+            duet.kind == crate::EntryKind::Directory
+        }
+        (Some(source), Some(duet)) => {
+            source.kind == duet.kind && source.size == duet.size && source.mtime_ns == duet.mtime_ns
+        }
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -160,5 +182,24 @@ mod tests {
         for (source, duet, expected) in cases {
             assert_eq!(decide(source, duet), expected);
         }
+    }
+
+    #[test]
+    fn matching_untracked_files_are_recorded_instead_of_conflicting() {
+        let snapshot = FileSnapshot {
+            relative_path: PathBuf::from("already-copied.bin"),
+            kind: crate::EntryKind::File,
+            size: 42,
+            mtime_ns: 123,
+        };
+        let plan = build_plan(
+            &BTreeMap::new(),
+            BTreeMap::from([(snapshot.relative_path.clone(), snapshot.clone())]),
+            BTreeMap::from([(snapshot.relative_path.clone(), snapshot)]),
+        );
+
+        assert!(plan.conflicts.is_empty());
+        assert_eq!(plan.operations.len(), 1);
+        assert_eq!(plan.operations[0].action, SyncAction::RecordBaseline);
     }
 }

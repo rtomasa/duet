@@ -166,7 +166,7 @@ impl DuetService {
                     return Err(error);
                 }
             };
-            match baseline_change(operation, copied) {
+            match baseline_change(operation, copied, plan) {
                 Ok(Some(entry)) => updated_entries.push(entry),
                 Ok(None) => removed_paths.push(operation.relative_path.clone()),
                 Err(error) => {
@@ -225,6 +225,7 @@ fn checked_origin_snapshot<'a>(
 fn baseline_change(
     operation: &PlannedOperation,
     copied: Option<executor::CopiedMetadata>,
+    plan: &SyncPlan,
 ) -> Result<Option<BaselineEntry>> {
     let path = &operation.relative_path;
     let entry = match operation.action {
@@ -258,6 +259,28 @@ fn baseline_change(
                 source_mtime_ns: Some(source_mtime_ns),
                 duet_size: Some(duet_size),
                 duet_mtime_ns: Some(duet_mtime_ns),
+            }
+        }
+        SyncAction::RecordBaseline => {
+            let source = plan.source_snapshots.get(path).ok_or_else(|| {
+                DuetError::Other(anyhow::anyhow!(
+                    "No Source metadata was recorded for {}",
+                    path.display()
+                ))
+            })?;
+            let duet = plan.duet_snapshots.get(path).ok_or_else(|| {
+                DuetError::Other(anyhow::anyhow!(
+                    "No Target metadata was recorded for {}",
+                    path.display()
+                ))
+            })?;
+            BaselineEntry {
+                relative_path: path.clone(),
+                kind: operation.kind,
+                source_size: Some(source.size),
+                source_mtime_ns: Some(source.mtime_ns),
+                duet_size: Some(duet.size),
+                duet_mtime_ns: Some(duet.mtime_ns),
             }
         }
         SyncAction::DeleteSource | SyncAction::DeleteDuet | SyncAction::RemoveBaseline => {
@@ -368,6 +391,40 @@ mod tests {
         );
         assert!(duet.join("empty").is_dir());
         assert!(!source.join(".duet").exists());
+    }
+
+    #[test]
+    fn matching_untracked_copies_are_adopted_without_being_overwritten() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let duet = temp.path().join("portable");
+        fs::create_dir_all(&source).unwrap();
+        write(&source.join("already-copied.txt"), "same contents");
+        let service = DuetService::create(&source, &duet, "Test").unwrap();
+        fs::copy(
+            source.join("already-copied.txt"),
+            duet.join("already-copied.txt"),
+        )
+        .unwrap();
+        let source_mtime = fs::metadata(source.join("already-copied.txt"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        filetime::set_file_mtime(
+            duet.join("already-copied.txt"),
+            filetime::FileTime::from_system_time(source_mtime),
+        )
+        .unwrap();
+
+        let plan = service.compare().unwrap();
+        assert!(plan.conflicts.is_empty());
+        assert_eq!(plan.operations.len(), 1);
+        assert_eq!(plan.operations[0].action, SyncAction::RecordBaseline);
+        service.synchronize(&plan, &BTreeMap::new()).unwrap();
+
+        let settled = service.compare().unwrap();
+        assert_eq!(settled.actionable_count(), 0);
+        assert!(settled.conflicts.is_empty());
     }
 
     #[test]

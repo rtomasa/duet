@@ -61,6 +61,9 @@ pub enum SyncAction {
     DeleteSource,
     DeleteDuet,
     RemoveBaseline,
+    /// Both untracked copies already match, so only the synchronization
+    /// baseline needs to be recorded.
+    RecordBaseline,
     Conflict,
 }
 

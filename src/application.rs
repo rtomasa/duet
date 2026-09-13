@@ -611,18 +611,35 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     }
     view.operation_rows.borrow_mut().clear();
     view.state.borrow_mut().resolutions.clear();
-    let changes = plan.actionable_count();
+    let total_files = total_file_count(&plan);
+    let changes = plan
+        .operations
+        .iter()
+        .filter(|op| !matches!(op.action, SyncAction::None | SyncAction::RecordBaseline))
+        .count();
+    let baseline_repairs = plan
+        .operations
+        .iter()
+        .filter(|op| op.action == SyncAction::RecordBaseline)
+        .count();
     let conflicts = plan.conflicts.len();
-    let changes_label = english_plural("{count} change", "{count} changes", changes as u32)
-        .replace("{count}", &changes.to_string());
+    let total_label = english_plural("{count} file", "{count} files", total_files as u32)
+        .replace("{count}", &total_files.to_string());
+    let changes_label = english_plural(
+        "{count} not synchronized",
+        "{count} not synchronized",
+        changes as u32,
+    )
+    .replace("{count}", &changes.to_string());
     let conflicts_label = english_plural("{count} conflict", "{count} conflicts", conflicts as u32)
         .replace("{count}", &conflicts.to_string());
-    view.summary
-        .set_text(&format!("{changes_label} · {conflicts_label}"));
+    view.summary.set_text(&format!(
+        "{total_label} · {changes_label} · {conflicts_label}"
+    ));
     for op in plan
         .operations
         .iter()
-        .filter(|op| op.action != SyncAction::None)
+        .filter(|op| !matches!(op.action, SyncAction::None | SyncAction::RecordBaseline))
     {
         let widgets = operation_row(op);
         view.list.append(&widgets.row);
@@ -638,21 +655,43 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
             .insert(conflict.operation.relative_path.clone(), widgets);
     }
     if changes == 0 && conflicts == 0 {
+        let synchronized_subtitle = if baseline_repairs > 0 {
+            english("No files need copying; synchronize to record matching copies")
+        } else {
+            english("No files need synchronizing")
+        };
         let row = adw::ActionRow::builder()
             .title(&english("Synchronized"))
-            .subtitle(&english("No changes found"))
+            .subtitle(&synchronized_subtitle)
             .build();
         row.add_prefix(&gtk::Image::from_icon_name("emblem-ok-symbolic"));
         view.list.append(&row);
     }
     let sync_label = if conflicts > 0 {
         english("Synchronize Non-conflicting Files")
+    } else if changes == 0 && baseline_repairs > 0 {
+        english("Record Synchronization")
     } else {
         english("Synchronize")
     };
     view.sync_button.set_label(&sync_label);
-    view.sync_button.set_sensitive(changes > 0 || conflicts > 0);
+    view.sync_button
+        .set_sensitive(changes > 0 || conflicts > 0 || baseline_repairs > 0);
     view.state.borrow_mut().plan = Some(plan);
+}
+
+fn total_file_count(plan: &SyncPlan) -> usize {
+    plan.source_snapshots
+        .iter()
+        .filter(|(_, snapshot)| snapshot.kind == EntryKind::File)
+        .count()
+        + plan
+            .duet_snapshots
+            .iter()
+            .filter(|(path, snapshot)| {
+                snapshot.kind == EntryKind::File && !plan.source_snapshots.contains_key(*path)
+            })
+            .count()
 }
 
 fn operation_row(op: &PlannedOperation) -> OperationWidgets {
@@ -688,9 +727,10 @@ fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWi
         );
         add_open_button(
             &row,
+            &view.toasts,
             view.state.borrow().source_root.as_deref(),
             &conflict.operation.relative_path,
-            &english("Open Source Copy"),
+            &english("Open Source Folder"),
         );
     }
     if !duet_deleted {
@@ -704,9 +744,10 @@ fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWi
         );
         add_open_button(
             &row,
+            &view.toasts,
             view.state.borrow().duet_root.as_deref(),
             &conflict.operation.relative_path,
-            &english("Open Target Copy"),
+            &english("Open Target Folder"),
         );
     }
     if source_deleted || duet_deleted {
@@ -755,19 +796,33 @@ fn add_resolution_button(
     row.add_suffix(&button);
 }
 
-fn add_open_button(row: &adw::ActionRow, root: Option<&Path>, relative: &Path, tooltip: &str) {
+fn add_open_button(
+    row: &adw::ActionRow,
+    toasts: &adw::ToastOverlay,
+    root: Option<&Path>,
+    relative: &Path,
+    tooltip: &str,
+) {
     let Some(root) = root else { return };
     let path = root.join(relative);
+    let folder = path.parent().unwrap_or(root).to_path_buf();
     let button = gtk::Button::builder()
         .icon_name("document-open-symbolic")
         .tooltip_text(tooltip)
         .build();
+    let toasts = toasts.clone();
     button.connect_clicked(move |_| {
-        let file = gio::File::for_path(&path);
-        let _ = gio::AppInfo::launch_default_for_uri(
-            file.uri().as_str(),
+        let folder = gio::File::for_path(&folder);
+        if let Err(error) = gio::AppInfo::launch_default_for_uri(
+            folder.uri().as_str(),
             None::<&gio::AppLaunchContext>,
-        );
+        ) {
+            show_error(
+                &toasts,
+                &english("Could not open the folder: {error}")
+                    .replace("{error}", &error.to_string()),
+            );
+        }
     });
     row.add_suffix(&button);
 }
@@ -1089,6 +1144,7 @@ fn action_label(action: SyncAction) -> String {
         SyncAction::DeleteSource => english("Deleted in Target → delete from Source"),
         SyncAction::DeleteDuet => english("Deleted in Source → delete from Target"),
         SyncAction::RemoveBaseline => english("Deleted from both copies"),
+        SyncAction::RecordBaseline => english("Identical copies — will record synchronization"),
         SyncAction::Conflict => english("Conflict"),
         SyncAction::None => english("Synchronized"),
     }
@@ -1333,7 +1389,7 @@ fn show_error(toasts: &adw::ToastOverlay, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use duet::ChangeState;
+    use duet::{ChangeState, FileSnapshot};
 
     fn deletion(action: SyncAction) -> PlannedOperation {
         PlannedOperation {
@@ -1358,5 +1414,40 @@ mod tests {
         let mut deleted = deletion(SyncAction::DeleteSource);
         apply_deletion_choice(&mut deleted, DeletionChoice::Delete);
         assert_eq!(deleted.action, SyncAction::DeleteSource);
+    }
+
+    #[test]
+    fn total_file_count_uses_the_union_of_source_and_target_files() {
+        let mut plan = SyncPlan::default();
+        let source_file = FileSnapshot {
+            relative_path: PathBuf::from("shared.bin"),
+            kind: EntryKind::File,
+            size: 1,
+            mtime_ns: 1,
+        };
+        plan.source_snapshots
+            .insert(source_file.relative_path.clone(), source_file.clone());
+        plan.duet_snapshots
+            .insert(source_file.relative_path.clone(), source_file);
+        plan.duet_snapshots.insert(
+            PathBuf::from("target-only.bin"),
+            FileSnapshot {
+                relative_path: PathBuf::from("target-only.bin"),
+                kind: EntryKind::File,
+                size: 1,
+                mtime_ns: 1,
+            },
+        );
+        plan.source_snapshots.insert(
+            PathBuf::from("folder"),
+            FileSnapshot {
+                relative_path: PathBuf::from("folder"),
+                kind: EntryKind::Directory,
+                size: 0,
+                mtime_ns: 1,
+            },
+        );
+
+        assert_eq!(total_file_count(&plan), 2);
     }
 }
