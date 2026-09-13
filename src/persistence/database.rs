@@ -1,21 +1,73 @@
-use crate::{BaselineEntry, EntryKind, PlannedOperation, Result};
+use crate::{BaselineEntry, DuetError, EntryKind, PlannedOperation, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
+use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use tempfile::TempPath;
 
 pub struct Database {
     conn: Connection,
+    // SQLite requires advisory byte-range locks, which are not implemented by
+    // every filesystem Duet can synchronize with (notably many SFTP mounts).
+    // Keep SQLite's live database on a local filesystem and publish committed
+    // snapshots back into the portable Target metadata directory.
+    local_path: TempPath,
+    remote_path: PathBuf,
 }
 
 impl Database {
     pub fn open(duet_root: &Path) -> Result<Self> {
-        let path = duet_root.join(".duet/state.sqlite");
-        let conn = Connection::open(&path)?;
+        let remote_path = Self::path(duet_root);
+        let local_path = tempfile::NamedTempFile::new()
+            .map_err(|e| DuetError::io("temporary database", e))?
+            .into_temp_path();
+        let remote_exists = remote_path
+            .try_exists()
+            .map_err(|e| DuetError::io(&remote_path, e))?;
+        if remote_exists {
+            fs::copy(&remote_path, &local_path).map_err(|e| DuetError::io(&remote_path, e))?;
+        }
+        let conn = Connection::open(&local_path)?;
         conn.pragma_update(None, "journal_mode", "DELETE")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let db = Self { conn };
+        let db = Self {
+            conn,
+            local_path,
+            remote_path,
+        };
         db.migrate()?;
+        if !remote_exists {
+            db.persist()?;
+        }
         Ok(db)
+    }
+
+    /// Atomically replace the portable copy after a committed local change.
+    /// The temporary file is created beside the destination so its rename is
+    /// atomic on filesystems that support atomic replacement (including
+    /// ordinary SFTP mounts).
+    fn persist(&self) -> Result<()> {
+        let parent = self
+            .remote_path
+            .parent()
+            .ok_or_else(|| DuetError::InvalidDuet(self.remote_path.clone()))?;
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".state-")
+            .tempfile_in(parent)
+            .map_err(|e| DuetError::io(parent, e))?;
+        let bytes = fs::read(&self.local_path).map_err(|e| DuetError::io(&self.local_path, e))?;
+        temporary
+            .write_all(&bytes)
+            .map_err(|e| DuetError::io(&self.remote_path, e))?;
+        temporary
+            .as_file()
+            .sync_all()
+            .map_err(|e| DuetError::io(&self.remote_path, e))?;
+        temporary
+            .persist(&self.remote_path)
+            .map_err(|e| DuetError::io(&self.remote_path, e.error))?;
+        Ok(())
     }
 
     fn migrate(&self) -> Result<()> {
@@ -105,6 +157,7 @@ impl Database {
             )?;
         }
         tx.commit()?;
+        self.persist()?;
         Ok(id)
     }
 
@@ -114,6 +167,7 @@ impl Database {
              WHERE transaction_id = ?1 AND sequence = ?2",
             params![transaction_id, sequence as i64],
         )?;
+        self.persist()?;
         Ok(())
     }
 
@@ -126,6 +180,7 @@ impl Database {
             "UPDATE duet SET last_sync_at = ?1 WHERE singleton = 1",
             params![chrono::Utc::now().to_rfc3339()],
         )?;
+        self.persist()?;
         Ok(())
     }
 
@@ -188,6 +243,7 @@ impl Database {
             params![now],
         )?;
         tx.commit()?;
+        self.persist()?;
         Ok(())
     }
 
@@ -196,6 +252,7 @@ impl Database {
             "UPDATE transactions SET state = 'INTERRUPTED', error = ?2 WHERE id = ?1",
             params![transaction_id, error],
         )?;
+        self.persist()?;
         Ok(())
     }
 
@@ -238,6 +295,7 @@ impl Database {
                 chrono::Utc::now().to_rfc3339(),
             ],
         )?;
+        self.persist()?;
         Ok(())
     }
 
@@ -246,10 +304,42 @@ impl Database {
             "DELETE FROM entries WHERE relative_path = ?1",
             params![path.to_string_lossy()],
         )?;
+        self.persist()?;
         Ok(())
     }
 
     pub fn path(duet_root: &Path) -> PathBuf {
         duet_root.join(".duet/state.sqlite")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publishes_committed_state_to_the_portable_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let duet_root = temp.path().join("target");
+        fs::create_dir_all(duet_root.join(".duet")).unwrap();
+
+        let database = Database::open(&duet_root).unwrap();
+        database
+            .upsert_entry(&BaselineEntry {
+                relative_path: PathBuf::from("note.txt"),
+                kind: EntryKind::File,
+                source_size: Some(5),
+                source_mtime_ns: Some(10),
+                duet_size: Some(5),
+                duet_mtime_ns: Some(20),
+            })
+            .unwrap();
+        drop(database);
+
+        let reopened = Database::open(&duet_root).unwrap();
+        assert!(reopened
+            .entries()
+            .unwrap()
+            .contains_key(Path::new("note.txt")));
     }
 }

@@ -10,7 +10,7 @@ Duet is a native GNOME application for explicit, local, bidirectional folder syn
 - Synchronize empty directories and deletions.
 - Detect two-sided conflicts and leave them untouched until the user decides.
 - Reject overlapping roots, path traversal, and symbolic links.
-- Journal operations in SQLite and recover by rescanning after interruption.
+- Journal operations in SQLite and recover by rescanning after interruption. SQLite works from a local temporary copy and atomically updates the portable metadata, so SFTP-mounted Targets do not need to provide SQLite file locking.
 - GTK 4/libadwaita interface plus GSettings, AppStream, desktop, and icon metadata.
 
 ## Build the synchronization core

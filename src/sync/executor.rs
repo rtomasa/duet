@@ -1,7 +1,9 @@
 use crate::{DuetError, EntryKind, FileSnapshot, PlannedOperation, Result, SyncAction};
 use filetime::FileTime;
 use fs2::FileExt;
+use std::collections::hash_map::DefaultHasher;
 use std::fs::{self, File, OpenOptions};
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -19,7 +21,15 @@ pub struct CopiedMetadata {
 
 impl MutationLock {
     pub fn acquire(duet_root: &Path) -> Result<Self> {
-        let path = duet_root.join(".duet/lock");
+        // Like SQLite, advisory locks are often unavailable on SFTP/FUSE
+        // mounts. A local lock still prevents two Duet instances on this
+        // machine from modifying the same Target at once.
+        let mut hasher = DefaultHasher::new();
+        duet_root
+            .canonicalize()
+            .unwrap_or_else(|_| duet_root.to_path_buf())
+            .hash(&mut hasher);
+        let path = std::env::temp_dir().join(format!("duet-{:016x}.lock", hasher.finish()));
         let mut file = OpenOptions::new()
             .create(true)
             .truncate(false)
