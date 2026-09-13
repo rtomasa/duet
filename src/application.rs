@@ -666,6 +666,7 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     view.operation_rows.borrow_mut().clear();
     view.state.borrow_mut().resolutions.clear();
     let total_files = total_file_count(&plan);
+    let total_folders = total_folder_count(&plan);
     let changes = plan
         .operations
         .iter()
@@ -679,6 +680,8 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     let conflicts = plan.conflicts.len();
     let total_label = english_plural("{count} file", "{count} files", total_files as u32)
         .replace("{count}", &total_files.to_string());
+    let folders_label = english_plural("{count} folder", "{count} folders", total_folders as u32)
+        .replace("{count}", &total_folders.to_string());
     let changes_label = english_plural(
         "{count} not synchronized",
         "{count} not synchronized",
@@ -688,7 +691,7 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
     let conflicts_label = english_plural("{count} conflict", "{count} conflicts", conflicts as u32)
         .replace("{count}", &conflicts.to_string());
     view.summary.set_text(&format!(
-        "{total_label} · {changes_label} · {conflicts_label}"
+        "{total_label} · {folders_label} · {changes_label} · {conflicts_label}"
     ));
     enum VisibleEntry<'a> {
         Operation(&'a PlannedOperation),
@@ -750,23 +753,33 @@ fn render_plan(view: &ViewComponents, plan: SyncPlan) {
 }
 
 fn total_file_count(plan: &SyncPlan) -> usize {
+    total_entry_count(plan, EntryKind::File)
+}
+
+fn total_folder_count(plan: &SyncPlan) -> usize {
+    total_entry_count(plan, EntryKind::Directory)
+}
+
+fn total_entry_count(plan: &SyncPlan, kind: EntryKind) -> usize {
     plan.source_snapshots
         .iter()
-        .filter(|(_, snapshot)| snapshot.kind == EntryKind::File)
+        .filter(|(_, snapshot)| snapshot.kind == kind)
         .count()
         + plan
             .duet_snapshots
             .iter()
             .filter(|(path, snapshot)| {
-                snapshot.kind == EntryKind::File && !plan.source_snapshots.contains_key(*path)
+                snapshot.kind == kind && !plan.source_snapshots.contains_key(*path)
             })
             .count()
 }
 
 fn operation_row(op: &PlannedOperation) -> OperationWidgets {
     let row = adw::ActionRow::builder()
-        .title(op.relative_path.to_string_lossy())
+        .title(display_path(&op.relative_path))
         .subtitle(action_label(op.action))
+        .use_markup(false)
+        .use_underline(false)
         .build();
     row.add_prefix(&gtk::Image::from_icon_name(match op.kind {
         EntryKind::File => "text-x-generic-symbolic",
@@ -779,8 +792,10 @@ fn operation_row(op: &PlannedOperation) -> OperationWidgets {
 
 fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWidgets {
     let row = adw::ActionRow::builder()
-        .title(conflict.operation.relative_path.to_string_lossy())
+        .title(display_path(&conflict.operation.relative_path))
         .subtitle(&english("Both copies changed — skipped until you choose"))
+        .use_markup(false)
+        .use_underline(false)
         .build();
     row.add_prefix(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
     let source_deleted = conflict.source.is_none();
@@ -832,6 +847,15 @@ fn conflict_row(view: &ViewComponents, conflict: &duet::Conflict) -> OperationWi
     let progress = operation_progress_bar();
     row.add_suffix(&progress);
     OperationWidgets { row, progress }
+}
+
+fn display_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if path.trim().is_empty() {
+        english("Unnamed file")
+    } else {
+        path.into_owned()
+    }
 }
 
 fn operation_progress_bar() -> gtk::ProgressBar {
@@ -1616,7 +1640,7 @@ mod tests {
     }
 
     #[test]
-    fn total_file_count_uses_the_union_of_source_and_target_files() {
+    fn total_entry_counts_use_the_union_of_source_and_target_paths() {
         let mut plan = SyncPlan::default();
         let source_file = FileSnapshot {
             relative_path: PathBuf::from("shared.bin"),
@@ -1648,5 +1672,12 @@ mod tests {
         );
 
         assert_eq!(total_file_count(&plan), 2);
+        assert_eq!(total_folder_count(&plan), 1);
+    }
+
+    #[test]
+    fn display_path_never_returns_an_empty_title() {
+        assert_eq!(display_path(Path::new("   ")), "Unnamed file");
+        assert_eq!(display_path(Path::new("games/file.bin")), "games/file.bin");
     }
 }
